@@ -22,7 +22,6 @@
 #include <BlynkSimpleEsp32.h>
 ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
 
-#include <ESP32RotaryEncoder.h>
 const char *ssid = STASSID;
 const char *pass = STAPSK;
 
@@ -36,8 +35,6 @@ ROMBackgroundAudioWAV BMP(audio);
 #define rotbutton 5
 #define onewirepin 7
 
-RotaryEncoder rotaryEncoder( rotLpin, rotRpin, rotbutton);
-
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
 
@@ -47,49 +44,30 @@ float temp1, temp2, temp3;
 float volts0, volts1, volts2, volts3;
 int channel = 1;
 bool onewirefound = false;
-bool pressed = false;
 
 SteinhartHart thermistor(15062.08,36874.80,82837.54, 348.15, 323.15, 303.15); //these are the default values for a Weber probe
 
 
 TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 TFT_eSprite img = TFT_eSprite(&tft);
+static  byte abOld;     // Initialize state
+volatile int count;     // current rotary count
+         int old_count;     // old rotary count
 volatile long enc_count = 0;
 
 #define TFT_GREY 0x5AEB // New colour
 
-
-void turnedRight()
-{
-  enc_count++;
+void pinChangeISR() {
+  enum { upMask = 0x66, downMask = 0x99 };
+  byte abNew = (digitalRead(rotRpin) << 1) | digitalRead(rotLpin);
+  byte criterion = abNew^abOld;
+  if (criterion==1 || criterion==2) {
+    if (upMask & (1 << (2*abOld + abNew/2)))
+      count++;
+    else count--;       // upMask = ~downMask
+  }
+  abOld = abNew;        // Save new state
 }
-
-void turnedLeft()
-{
-  enc_count--;  
-}
-
-void knobCallback( long value )
-{
-	switch( value )
-	{
-		case 1:
-        enc_count++;
-		break;
-
-		case -1:
-        enc_count--; 
-		break;
-	}
-	rotaryEncoder.setEncoderValue( 0 );
-}
-
-void buttonCallback( unsigned long duration )
-{
-  pressed = true;
-}
-
-
 
 float readChannel(ADS1115_MUX channel) {
   float voltage = 0.0;
@@ -112,8 +90,9 @@ float readChannelV(ADS1115_MUX channel) {
 void doADC() {  //take measurements from the ADC without blocking
   if (!adc.isBusy()) {
     if (channel == 0) {
-      adc0 = adc.getResult_V();
-      tempA0 = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15;
+      volts0 = adc.getResult_V();
+      adc0 = adc.getRawResult(); // alternative: getResult_mV for Millivolt
+      tempA0 = thermistor.resistanceToTemperature(ADSToOhms(volts0)) - 273.15;
       tempA0f = (tempA0 * 1.8) + 32;
       adc.setCompareChannels(ADS1115_COMP_1_GND);
       adc.startSingleMeasurement();
@@ -121,8 +100,9 @@ void doADC() {  //take measurements from the ADC without blocking
       return;
     }
     if (channel == 1) {
-      adc1 = adc.getResult_V();
-      tempA1 = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;
+      volts1 = adc.getResult_V();
+      adc1 = adc.getRawResult(); // alternative: getResult_mV for Millivolt
+      tempA1 = thermistor.resistanceToTemperature(ADSToOhms(volts1)) - 273.15;
       tempA1f = (tempA1 * 1.8) + 32;
       adc.setCompareChannels(ADS1115_COMP_2_GND);
       adc.startSingleMeasurement();
@@ -130,7 +110,7 @@ void doADC() {  //take measurements from the ADC without blocking
       return;
     }
     if (channel == 2) {  //channel for measuring battery voltage
-      volts2 = adc.getResult_V();
+      volts2 = adc.getResult_V() * 2.0;
       adc.setCompareChannels(ADS1115_COMP_0_GND);
       adc.startSingleMeasurement();
       channel = 0;
@@ -139,7 +119,7 @@ void doADC() {  //take measurements from the ADC without blocking
   }
 }
 
-double ADSToOhms(int16_t ADSreading) { //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
+double ADSToOhms(float ADSreading) { //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
       float voltsX = ADSreading;
       return (voltsX * 22000) / (3.3 - voltsX);
 }
@@ -195,18 +175,13 @@ uint8_t findDevices(int pin) {
 
 
 void setup(void) {
-  rotaryEncoder.setEncoderType( EncoderType::FLOATING );
-  rotaryEncoder.setBoundaries( -1, 1, false );
-
-  rotaryEncoder.onTurned( &knobCallback );
-
-  rotaryEncoder.onPressed( &buttonCallback );
-
-  rotaryEncoder.begin();
-
-  //pinMode(rotbutton, INPUT_PULLUP);
- // attachInterrupt(digitalPinToInterrupt(rotLpin), encoder_isr, CHANGE);  // Set up pin-change interrupts
- // attachInterrupt(digitalPinToInterrupt(rotRpin), encoder_isr, CHANGE);
+  thermistor.calcCoefficients();
+  pinMode(rotLpin, INPUT_PULLUP);
+  pinMode(rotRpin, INPUT_PULLUP);
+  pinMode(rotbutton, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(rotLpin), pinChangeISR, CHANGE);  // Set up pin-change interrupts
+  attachInterrupt(digitalPinToInterrupt(rotRpin), pinChangeISR, CHANGE);
+    abOld = count = old_count = 0;
   Serial.begin(115200);
   Serial.println("Hello!");
   tft.init();
@@ -264,10 +239,10 @@ void doDisplay() {
   img.setTextSize(1);
   img.setCursor(0, 0);
   img.print("Rotary count: ");
-  img.println(enc_count);
-  //img.print("Step count: ");
-  //img.println(stepCount);
-  if (pressed) {
+  img.println(count);
+  img.print("Step count: ");
+  img.println(count / 4); // divide by 4 to get the step count
+  if (!digitalRead(rotbutton)) {
     img.setTextColor(TFT_RED, TFT_BLUE);
     img.println("Button pressed!");
     if (!BMP.done()) {
@@ -276,7 +251,6 @@ void doDisplay() {
       BMP.flush(); // Stop any existing output, reset for new file
       BMP.write(RingOfFire, sizeof(RingOfFire));
     }
-    pressed = false;
   } else {
     img.setTextColor(TFT_WHITE, TFT_BLUE);
     img.println("Button not pressed");
@@ -289,8 +263,10 @@ void doDisplay() {
     img.setTextColor(TFT_YELLOW, TFT_BLUE);
     img.println("Not playing");
   }
-  img.println("A0 Temp: " + String(tempA0f, 1) + " F");
-  img.println("A1 Temp: " + String(tempA1f, 1) + " F");
+  img.println("A0 v: " + String(tempA0f, 3) + " f");
+  img.println("A0 c: " + String(tempA0, 3) + " C");
+  img.println("A1 v: " + String(tempA1f, 3) + " f");
+  img.println("A1 c: " + String(tempA1, 3) + " C");
   img.println("A2 Voltage: " + String(volts2, 3) + " V");
   if (onewirefound) {
     sensors.requestTemperatures(); 
