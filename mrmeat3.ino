@@ -1,5 +1,15 @@
+#include <WiFiManager.h> 
+#include <TFT_eSPI.h> 
+#include "Fonts/NotoSansBold15.h"
 #include <ESP_I2S.h>
 // Graphics and font library for ST7735 driver chip
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Preferences.h>
+#include <BlynkSimpleEsp32.h>
+#include <ArduinoOTA.h>
+#include "Fonts/SegoeUI_Bold_48.h"
+#include <BlynkSimpleEsp32.h>
 #include <SPI.h>
 #include <LittleFS.h>
 #include <BackgroundAudioSpeech.h>
@@ -9,18 +19,20 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <BackgroundAudio.h>
-#include <TFT_eSPI.h> 
+#include <nvs_flash.h>
 #include <JohnnyCash.h>
 #define STASSID "mikesnet"
 #define STAPSK "springchicken"
 #include<ADS1115_WE.h> 
 #include<Wire.h>
+
+
 #define I2C_ADDRESS 0x48
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <Preferences.h>
-#include <BlynkSimpleEsp32.h>
+#define AA_FONT_SMALL NotoSansBold15
+#define AA_FONT_LARGE SegoeUI_Bold_48
+
 ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
+
 
 const char *ssid = STASSID;
 const char *pass = STAPSK;
@@ -29,21 +41,27 @@ ESP32I2SAudio audio(2, 3, 0); // BCLK, LRCLK, DOUT (,MCLK)
 
 ROMBackgroundAudioWAV BMP(audio);
 
+char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 
 #define rotLpin 21
 #define rotRpin 20
 #define rotbutton 5
 #define onewirepin 7
+#define is2connectedthreshold 15000 
 
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
 
+int animStep = 1;
 float onewiretempC, tempF, tempA0, tempA1, tempA0f, tempA1f, barx;
 long adc0, adc1, adc2, adc3, therm1, therm2, therm3; //had to change to long since uint16 wasn't long enough
 float temp1, temp2, temp3;
 float volts0, volts1, volts2, volts3;
 int channel = 1;
 bool onewirefound = false;
+bool calibrationMode = false;
+bool isPlaying = false;
+int animpos = 80;
 
 SteinhartHart thermistor(15062.08,36874.80,82837.54, 348.15, 323.15, 303.15); //these are the default values for a Weber probe
 
@@ -51,21 +69,321 @@ SteinhartHart thermistor(15062.08,36874.80,82837.54, 348.15, 323.15, 303.15); //
 TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 TFT_eSprite img = TFT_eSprite(&tft);
 static  byte abOld;     // Initialize state
-volatile int count;     // current rotary count
+volatile int count = 580;     // current rotary count
+volatile int downcount = 0;     // current rotary count
+volatile int upcount = 0;     // current rotary count
          int old_count;     // old rotary count
 volatile long enc_count = 0;
 
 #define TFT_GREY 0x5AEB // New colour
+
+void waitForButtonsReleased() {
+  while (!digitalRead(rotbutton)) {
+    delay(10); // debounce delay
+  }
+}
+
+
+float estimateBatteryTime(float voltage) {
+  const int numPoints = 22;
+  float voltages[numPoints] = {
+    3.9735, 3.9558, 3.9230, 3.8958, 3.8647, 3.8223, 3.7902, 3.7655, 3.7163,
+    3.6793, 3.6387, 3.5762, 3.5502, 3.5107, 3.4837, 3.4598, 3.4235, 3.3932,
+    3.3355, 3.2773, 3.2123, 3.0920
+  };
+  float times[numPoints] = {
+    831, 791, 751, 701, 671, 631, 591, 561, 501,
+    471, 431, 391, 351, 311, 261, 241, 191, 151,
+    111,  71,  31,   0
+  };
+
+  if (voltage >= voltages[0]) return times[0];
+  if (voltage <= voltages[numPoints - 1]) return 0;
+
+  for (int i = 0; i < numPoints - 1; i++) {
+    if (voltage <= voltages[i] && voltage > voltages[i + 1]) {
+      float v1 = voltages[i];
+      float v2 = voltages[i + 1];
+      float t1 = times[i];
+      float t2 = times[i + 1];
+      return t1 + (voltage - v1) * (t2 - t1) / (v2 - v1);
+    }
+  }
+
+  return 0; // fallback
+}
+
+
+  
+uint16_t cmap[24];
+const char* cmapNames[24];
+
+
+void initializeCmap() {
+    cmap[0] =  TFT_BLACK;
+    cmapNames[0] = "BLACK";
+    cmap[1] =  TFT_NAVY;
+    cmapNames[1] = "NAVY";
+    cmap[2] =  TFT_DARKGREEN;
+    cmapNames[2] = "DARKGREEN";
+    cmap[3] =  TFT_DARKCYAN;
+    cmapNames[3] = "DARKCYAN";
+    cmap[4] =  TFT_MAROON;
+    cmapNames[4] = "MAROON";
+    cmap[5] =  TFT_PURPLE;
+    cmapNames[5] = "PURPLE";
+    cmap[6] =  TFT_OLIVE;
+    cmapNames[6] = "OLIVE";
+    cmap[7] =  TFT_LIGHTGREY;
+    cmapNames[7] = "LIGHTGREY";
+    cmap[8] =  TFT_DARKGREY;
+    cmapNames[8] = "DARKGREY";
+    cmap[9] =  TFT_BLUE;
+    cmapNames[9] = "BLUE";
+    cmap[10] =  TFT_GREEN;
+    cmapNames[10] = "GREEN";
+    cmap[11] =  TFT_CYAN;
+    cmapNames[11] = "CYAN";
+    cmap[12] =  TFT_RED;
+    cmapNames[12] = "RED";
+    cmap[13] =  TFT_MAGENTA;
+    cmapNames[13] = "MAGENTA";
+    cmap[14] =  TFT_YELLOW;
+    cmapNames[14] = "YELLOW";
+    cmap[15] =  TFT_WHITE;
+    cmapNames[15] = "WHITE";
+    cmap[16] =  TFT_ORANGE;
+    cmapNames[16] = "ORANGE";
+    cmap[17] =  TFT_GREENYELLOW;
+    cmapNames[17] = "GREENYELLOW";
+    cmap[18] =  TFT_PINK;
+    cmapNames[18] = "PINK";
+    cmap[19] =  TFT_BROWN;
+    cmapNames[19] = "BROWN";
+    cmap[20] =  TFT_GOLD;
+    cmapNames[20] = "GOLD";
+    cmap[21] =  TFT_SILVER;
+    cmapNames[21] = "SILVER";
+    cmap[22] =  TFT_SKYBLUE;
+    cmapNames[22] = "SKYBLUE";
+    cmap[23] =  TFT_VIOLET;
+    cmapNames[23] = "VIOLET";
+}
+
+
+double oldtemp, tempdiff, eta, eta2, oldtemp2, tempdiff2;
+int etamins, etasecs;
+
+int settemp = 145;
+bool is1connected = false;
+bool is2connected = false;
+int setSelection = 0;
+int setAlarm, setUnits;
+int setBGC = 15; //background color
+int setFGC = 0;
+int setVolume = 100;
+int setLEDmode = 0;
+int rssi;
+
+bool b1pressed = false;
+bool b2pressed = false;
+bool settingspage = false;
+bool kincreased = false;
+int setIcons = 1;
+
+Preferences preferences;
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 160
+
+#define every(interval) \        
+  static uint32_t __every__##interval = millis(); \
+  if (millis() - __every__##interval >= interval && (__every__##interval = millis()))
+
+  String dallasString,  temp1string,temp2string,temp3string, coeffAstring,  coeffBstring,  coeffCstring;
+  
+void drawWiFiSignalStrength(int32_t x, int32_t y, int32_t radius) { //chatGPT-generated function to draw a wifi icon with variable rings
+    // Get the RSSI value
+    
+    
+    // Define colors
+    uint32_t color;
+    int numArcs;
+
+    // Determine the color and number of arcs to draw based on RSSI value
+    if (rssi > -60) {
+        color = cmap[setFGC];
+        numArcs = 3;
+    } else if (rssi > -75) {
+        color = cmap[setFGC];
+        numArcs = 2;
+    } else if (rssi > -85) {
+        color = cmap[setFGC];
+        numArcs = 2;
+    } else {
+        color = cmap[setFGC];
+        numArcs = 1;
+    }
+
+    // Draw the base circle/dot
+    img.fillCircle(x, y+1, 1, color);
+
+    // Draw arcs based on the determined number of arcs and color
+    if (numArcs >= 1) {
+        img.drawArc(x, y, radius / 3, radius / 3 - 1, 135, 225, color, cmap[setBGC]);  // Arc 1
+    }
+    if (numArcs >= 2) {
+        img.drawArc(x, y, 2 * radius / 3, 2 * radius / 3 - 1, 135, 225, color, cmap[setBGC]);  // Arc 2
+    }
+    if (numArcs >= 3) {
+        img.drawArc(x, y, radius, radius - 1, 135, 225, color, cmap[setBGC]);  // Arc 3
+    }
+}
+
+
+
+
+void drawTemps() { //main screen
+ 
+    if (!digitalRead(rotbutton)) { //if both are pressed at the same time
+      settingspage = true;  //go to settings page 
+      waitForButtonsReleased();
+    }
+  
+
+  img.fillSprite(cmap[setBGC]);
+  img.setCursor(0,0);
+  img.setTextSize(1);
+  img.setTextColor(cmap[setFGC], cmap[setBGC]);
+  img.setTextDatum(TC_DATUM);
+
+  // Proportional scaling factors
+  // 240x240 -> 128x160: x = x * 0.533, y = y * 0.666
+  // Example: 240 -> 128, 240 -> 160
+    img.loadFont(AA_FONT_LARGE); //smaller font for 128x160
+  if (is2connected) {
+
+    float a0ex = 164.4;
+    float a1ex = 288.8;
+    img.drawFloat(tempA0f, 1, 64, 3);   // 60,5 -> 32,3
+    img.drawFloat(tempA1f, 1, 64, 48);   // 180,5 -> 96,3
+    //img.drawFastVLine(64, 0, 56, cmap[setFGC]); // 120,0,85 -> 64,0,56
+  }
+  else if (is1connected) {
+    img.drawFloat(tempA0f, 1, 64, 22);   // 115,5 -> 56,3
+  }
+  else {
+    img.drawString("N/C", 64, 22, 1); // 115,5 -> 56,3
+  }
+  img.drawFastHLine(0, 90, 128, cmap[setFGC]); // 0,85,240 -> 0,56,128
+  img.unloadFont();
+  img.setTextFont(1);
+  img.setTextDatum(TR_DATUM);
+
+  // Degrees/unit indicator
+  if (setUnits == 0) {img.drawCircle(120,2,1,cmap[setFGC]); img.drawString("C", 128,1);}
+  else if (setUnits == 1) {img.drawCircle(120,2,1,cmap[setFGC]); img.drawString("F", 128,1);}
+  else if (setUnits == 2) {img.drawString("K", 127,1);}
+
+  img.setTextDatum(TL_DATUM);
+  img.loadFont(AA_FONT_SMALL);
+  img.setCursor(3, 110); // 5,100+24 -> 3,70
+  String settempstring = ">" + String(count / 4) + "<";
+  img.print("Set Temp:");
+  img.setTextDatum(TR_DATUM);
+  img.drawString(settempstring, 127, 110); // 239,100 -> 127,70
+  img.setTextDatum(TL_DATUM);
+
+  img.setCursor(3, 130); // 5,170+24 -> 3,120
+  img.print("ETA:");
+  String etastring;
+  if ((etamins < 1000) && (etamins >= 0)) {
+    etastring = String(etamins) + "mins";
+  }
+  else {
+    etastring = "---mins";
+  }
+  img.setTextDatum(TR_DATUM);
+  img.drawString(etastring, 127, 130); // 239,170 -> 127,120
+  img.unloadFont();
+  img.setTextFont(1);
+
+  img.drawFastHLine(0, 150, 128, cmap[setFGC]); // 0,226,240 -> 0,150,128
+
+  if (setIcons == 0) {
+    img.setCursor(1, 153); // 1,231
+    img.print(WiFi.localIP());
+    String v2String = String(rssi) + "dB/" + String(volts2,2) + "v";
+    img.setTextDatum(BR_DATUM);
+    img.drawString(v2String, 127,159); // 239,239 -> 127,159
+  } else if (setIcons == 1) {
+    img.setCursor(1, 152);
+    img.print(WiFi.localIP());
+    img.setTextDatum(BR_DATUM);
+    img.drawRect(110,153,16,6,cmap[setFGC]); // moved right 3 more pixels
+    img.fillRect(110,153,barx,6,cmap[setFGC]);
+    img.drawFastVLine(126,155,3,cmap[setFGC]);
+    if (WiFi.status() == WL_CONNECTED) {drawWiFiSignalStrength(98,157,6);} // 200,237,9 -> 92,157,6
+  } else if (setIcons == 2) {
+    float minsLeft = estimateBatteryTime(volts2);
+    int hours = minsLeft / 60;
+    int mins = (int)minsLeft % 60;
+    img.setCursor(1, 153);
+    img.printf("Batt: %dh:%dmin", hours, mins);
+    img.setTextDatum(BR_DATUM);
+    img.drawRect(110,153,16,6,cmap[setFGC]); // moved right 3 more pixels
+    img.fillRect(110,153,barx,6,cmap[setFGC]);
+    img.drawFastVLine(126,155,3,cmap[setFGC]);
+    if (WiFi.status() == WL_CONNECTED) {drawWiFiSignalStrength(98,157,6);}
+  }
+
+  int animX = 80;
+  int animY = 156;
+
+  switch (animStep) {
+    case 1: // x80, y156
+      animX = 80;
+      animY = 156;
+      break;
+    case 2: // x83, y156
+      animX = 83;
+      animY = 156;
+      break;
+    case 3: // x83, y159
+      animX = 83;
+      animY = 159;
+      break;
+    case 4: // x80, y159
+      animX = 80;
+      animY = 159;
+      break;
+    default:
+      animX = 80;
+      animY = 156;
+      break;
+  }
+
+  img.fillRect(animX + 3, animY - 3, 3, 3, cmap[setFGC]);
+
+  img.pushSprite(0, 0);
+}
+
+volatile bool rotLeft = false; // Flag for left rotation
+volatile bool rotRight = false; // Flag for right rotation
+
 
 void pinChangeISR() {
   enum { upMask = 0x66, downMask = 0x99 };
   byte abNew = (digitalRead(rotRpin) << 1) | digitalRead(rotLpin);
   byte criterion = abNew^abOld;
   if (criterion==1 || criterion==2) {
-    if (upMask & (1 << (2*abOld + abNew/2)))
-      count++;
-    else count--;       // upMask = ~downMask
-  }
+    if (upMask & (1 << (2*abOld + abNew/2))){
+        count++;
+    }
+      else {count--;       // upMask = ~downMask
+      }
+    }
+  
   abOld = abNew;        // Save new state
 }
 
@@ -92,8 +410,12 @@ void doADC() {  //take measurements from the ADC without blocking
     if (channel == 0) {
       volts0 = adc.getResult_V();
       adc0 = adc.getRawResult(); // alternative: getResult_mV for Millivolt
-      tempA0 = thermistor.resistanceToTemperature(ADSToOhms(volts0)) - 273.15;
-      tempA0f = (tempA0 * 1.8) + 32;
+      tempA0 = thermistor.resistanceToTemperature(ADSToOhms(volts0));
+      if (setUnits == 0) {tempA0f = tempA0 - 273.15;}
+      else if (setUnits == 1) {
+        tempA0f = (tempA0 * 1.8) + 32;
+      }
+      else if (setUnits == 2) {tempA0f = tempA0;}
       adc.setCompareChannels(ADS1115_COMP_1_GND);
       adc.startSingleMeasurement();
       channel = 1;
@@ -102,8 +424,12 @@ void doADC() {  //take measurements from the ADC without blocking
     if (channel == 1) {
       volts1 = adc.getResult_V();
       adc1 = adc.getRawResult(); // alternative: getResult_mV for Millivolt
-      tempA1 = thermistor.resistanceToTemperature(ADSToOhms(volts1)) - 273.15;
-      tempA1f = (tempA1 * 1.8) + 32;
+      tempA1 = thermistor.resistanceToTemperature(ADSToOhms(volts1));
+      if (setUnits == 0) {tempA1f = tempA1 - 273.15;}
+      else if (setUnits == 1) {
+        tempA1f = (tempA1 * 1.8) + 32;
+      }
+      else if (setUnits == 2) {tempA1f = tempA1;}
       adc.setCompareChannels(ADS1115_COMP_2_GND);
       adc.startSingleMeasurement();
       channel = 2;
@@ -173,8 +499,156 @@ uint8_t findDevices(int pin) {
   return count;
 }
 
+bool editMode = false;
+int editSelection = 0; // which menu item is being edited
 
-void setup(void) {
+void drawSettings() {  //if we're in settings mode
+  if (old_count > settemp) { //if the encoder was turned left
+    rotLeft = true;
+  }
+  else if (old_count < settemp) { //if the encoder was turned right
+    rotRight = true;
+  }
+  old_count = settemp;
+  img.fillSprite(TFT_BLACK);
+  img.setCursor(0,0);
+  img.setTextSize(1);
+  img.setTextColor(TFT_WHITE);
+  img.setTextDatum(TL_DATUM);
+  img.setTextWrap(true); // Wrap on width
+  img.setTextFont(1);  
+
+
+    if (!digitalRead(rotbutton)) {
+      b1pressed = true;
+      waitForButtonsReleased();  //wait for button to be released
+    }
+
+if (!editMode) {
+    if (rotLeft) {
+      setSelection--;
+      rotLeft = false;  //reset flag
+    }
+    if (rotRight) {
+      setSelection++;
+      rotRight = false;  //reset flag
+    }
+    if (setSelection < 0) setSelection = 8;  //wrap around on the 0th menu item
+    if (setSelection > 8) setSelection = 0;  //wrap around on the 8th menu item
+    if (b1pressed) {
+      editMode = true;
+      editSelection = setSelection;
+     if (setSelection == 7) { doSound(); b1pressed = false; }
+     if (setSelection == 8) { savePrefs(); settingspage = false; b1pressed = false; waitForButtonsReleased(); }
+   
+      b1pressed = false;
+      // Optionally, store the base count for this value if you want to "snap" to current value
+    }
+  } else {
+    // In edit mode, use rotLeft/rotRight to change the value
+    switch (editSelection) {
+      case 0: // Alarm
+        if (rotLeft) { setAlarm = (setAlarm + 4) % 5; rotLeft = false; }
+        if (rotRight) { setAlarm = (setAlarm + 1) % 5; rotRight = false; }
+        break;
+      case 1: // Units
+        if (rotLeft) { setUnits = (setUnits + 2) % 3; rotLeft = false; }
+        if (rotRight) { setUnits = (setUnits + 1) % 3; rotRight = false; }
+        break;
+      case 2: // BG Colour
+        if (rotLeft) { setBGC = (setBGC + 23) % 24; rotLeft = false; }
+        if (rotRight) { setBGC = (setBGC + 1) % 24; rotRight = false; }
+        break;
+      case 3: // FG Colour
+        if (rotLeft) { setFGC = (setFGC + 23) % 24; rotLeft = false; }
+        if (rotRight) { setFGC = (setFGC + 1) % 24; rotRight = false; }
+        break;
+      case 4: // Volume
+        if (rotLeft) { setVolume = (setVolume + 100) % 101; rotLeft = false; }
+        if (rotRight) { setVolume = (setVolume + 1) % 101; rotRight = false; }
+        break;
+      case 5: // Icons
+        if (rotLeft) { setIcons = (setIcons + 2) % 3; rotLeft = false; }
+        if (rotRight) { setIcons = (setIcons + 1) % 3; rotRight = false; }
+        break;
+      case 6: // LED Mode
+        if (rotLeft) { setLEDmode = (setLEDmode + 3) % 4; rotLeft = false; }
+        if (rotRight) { setLEDmode = (setLEDmode + 1) % 4; rotRight = false; }
+        break;
+  // Special actions for Test Spk and Save
+    }
+    if (b1pressed) {
+      editMode = false;
+      b1pressed = false;
+    }
+  }
+
+// Draw menu items
+  for (int i = 0; i < 9; i++) {
+    if (setSelection == i && !editMode) {
+      img.setTextColor(TFT_BLACK, TFT_WHITE, true);
+    } else {
+      img.setTextColor(TFT_WHITE);
+    }
+    switch (i) {
+      case 0: img.println("Alarm:"); break;
+      case 1: img.println("Units:"); break;
+      case 2: img.println("BG Colour:"); break;
+      case 3: img.println("FG Colour:"); break;
+      case 4: img.println("Volume:"); break;
+      case 5: img.println("Icons:"); break;
+      case 6: img.println("LED Mode:"); break;
+      case 7: img.println(">Test Spk<"); break;
+      case 8: img.println(">Save<"); break;
+    }
+  }
+
+  // Draw values on right, highlight if in edit mode
+  img.setTextDatum(TR_DATUM);
+  for (int i = 0; i < 9; i++) {
+    int y = i * 8;
+    bool highlight = (editMode && editSelection == i);
+    if (highlight) img.setTextColor(TFT_BLACK, TFT_WHITE, true);
+    else img.setTextColor(TFT_WHITE);
+
+    switch (i) {
+      case 0: img.drawNumber(setAlarm, 128, y); break;
+      case 1: {
+        String setUnitString = (setUnits == 0) ? "C" : (setUnits == 1) ? "F" : "K";
+        img.drawString(setUnitString, 128, y);
+        break;
+      }
+      case 2: img.drawNumber(setBGC, 128, y); break;
+      case 3: img.drawNumber(setFGC, 128, y); break;
+      case 4: img.drawNumber(setVolume, 128, y); break;
+      case 5: {
+        String setIconString = (setIcons == 0) ? "T" : (setIcons == 1) ? "Y" : "B";
+        img.drawString(setIconString, 128, y);
+        break;
+      }
+      case 6: img.drawNumber(setLEDmode, 128, y); break;
+      case 7: break; // Test Spk, no value
+      case 8: break; // Save, no value
+    }
+  }
+
+  // Special actions for Test Spk and Save
+  if (setSelection == 7 && !editMode && b1pressed) { doSound(); b1pressed = false; }
+  if (setSelection == 8 && !editMode && b1pressed) { savePrefs(); b1pressed = false; waitForButtonsReleased(); }
+
+  // Draw sample string
+  img.setTextDatum(TC_DATUM);
+  img.setTextColor(cmap[setFGC], cmap[setBGC], true);
+  String sampleString = String(setFGC) + cmapNames[setFGC];
+  img.drawString(sampleString, 64, 140);
+
+  img.pushSprite(0, 0);  //draw everything
+}
+
+
+
+void setup() {
+  initializeCmap();
   thermistor.calcCoefficients();
   pinMode(rotLpin, INPUT_PULLUP);
   pinMode(rotRpin, INPUT_PULLUP);
@@ -192,96 +666,196 @@ void setup(void) {
     Serial.println("ADS1115 not connected!");
   }
   adc.setVoltageRange_mV(ADS1115_RANGE_4096); // Set voltage range to 0-4.096V
-  /*
-  // Set "cursor" at top left corner of display (0,0) and select font 2
-  // (cursor will move to next line automatically during printing with 'tft.println'
-  //  or stay on the line is there is room for the text with tft.print)
-  tft.setCursor(0, 0, 2);
-  // Set the font colour to be white with a black background, set text size multiplier to 1
-  tft.setTextColor(TFT_WHITE,TFT_BLACK);  tft.setTextSize(1);
-  // We can now plot text on screen using the "print" class
-  tft.print("Connecting to wifi...");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, pass);
-  WiFi.setTxPower (WIFI_POWER_8_5dBm);
-  while (WiFi.status() != WL_CONNECTED) {
-    tft.print(".");
-    delay(100);
+  preferences.begin("my-app", false); //read preferences from flash, with default values if none are found
+  temp1 = preferences.getFloat("temp1", 0);
+  temp2 = preferences.getFloat("temp2", 0);
+  temp3 = preferences.getFloat("temp3", 0);
+  therm1 = preferences.getInt("therm1", 0);
+  therm2 = preferences.getInt("therm2", 0);
+  therm3 = preferences.getInt("therm3", 0);
+  setAlarm = preferences.getInt("setAlarm", 0);
+  setUnits = preferences.getInt("setUnits", 1);
+  setFGC = preferences.getInt("setFGC", 12);
+  setBGC = preferences.getInt("setBGC", 4);
+  setVolume = preferences.getInt("setVolume", 100);
+  setLEDmode = preferences.getInt("setLEDmode", 2);
+  setIcons = preferences.getInt("setIcons", 1);
+  count = preferences.getInt("count", 580);
+  preferences.end();
+  if (setFGC == setBGC) {setFGC = 15; setBGC = 0;}  //do not allow foreground and background colour to be the same
+  if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //if probe temp calibration has been saved to flash, use it
+        thermistor.setTemperature1(temp1 + 273.15);
+        thermistor.setTemperature2(temp2 + 273.15);
+        thermistor.setTemperature3(temp3 + 273.15);
+        thermistor.setResistance1(therm1);
+        thermistor.setResistance2(therm2);
+        thermistor.setResistance3(therm3);
+        thermistor.calcCoefficients();
   }
-  tft.fillScreen(TFT_BLACK);
-  tft.setCursor(0, 0, 2);
-  tft.print("http://");
-  tft.println(WiFi.localIP());
-  delay(1000);
-  tft.fillScreen(TFT_BLACK);*/
-
-  
-
   img.setColorDepth(8);  //WE DONT HAVE ENOUGH RAM LEFT FOR 16 BIT AND JOHNNY CASH, MUST USE 8 BIT COLOUR!
   img.createSprite(128, 160);
   img.fillSprite(TFT_BLUE);
   BMP.begin();
   BMP.setGain(0.1);
-  BMP.flush(); // Stop any existing output, reset for new file
-  forceADC(); // Force an initial ADC read to populate the values
+  
+  oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
+  oldtemp2 = tempA1f;
+  forceADC(); 
+  drawTemps();
+
+WiFi.mode(WIFI_STA);  //precharge the wifi
+  WiFiManager wm;  //FIRE UP THE WIFI MANAGER SYSTEM FOR WIFI PROVISIONING
+  if ((!digitalRead(rotbutton)) || !wm.getWiFiIsSaved()){  //If either both buttons are pressed on bootup OR no wifi info is saved
+    nvs_flash_erase(); // erase the NVS partition to wipe all settings
+    nvs_flash_init(); // initialize the NVS partition.
+    tft.fillScreen(TFT_ORANGE);
+    tft.setCursor(0, 0);
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    tft.println("SETTINGS RESET.");
+    tft.println("");
+    tft.println("Please connect to");
+    tft.println("'MR MEAT SETUP'");
+    tft.println("WiFi, and browse to");
+    tft.println("192.168.4.1.");
+    wm.resetSettings();  
+    
+
+    bool res;
+    // res = wm.autoConnect(); // auto generated AP name from chipid
+    // res = wm.autoConnect("AutoConnectAP"); // anonymous ap
+    res = wm.autoConnect("MrMeat3 Setup"); 
+
+    if(!res) {  //if the wifi manager failed to connect to wifi
+        tft.fillScreen(TFT_RED);
+        tft.setCursor(0, 0);
+        tft.println("Failed to connect, restarting");
+        delay(3000);
+        ESP.restart();
+    } 
+    else {
+        //if you get here you have connected to the WiFi    
+        tft.fillScreen(TFT_GREEN);
+        tft.setCursor(0, 0);
+        tft.println("Connected!");
+        tft.println(WiFi.localIP());
+        delay(3000);
+        ESP.restart();  //restart the device now because bugs, user will never notice it's so fuckin fast
+    }
+  }
+  else {  //if wifi information was saved, use it
+    WiFi.begin(wm.getWiFiSSID(), wm.getWiFiPass());
+
+  }
+  rssi = WiFi.RSSI();
+  //BMP.flush(); // Stop any existing output, reset for new file
+  // Force an initial ADC read to populate the values
   //BMP.write(RingOfFire, sizeof(RingOfFire));
   sensors.begin();
   if (findDevices(onewirepin) > 0) //check and see if the probe is connected, if it is,
   {
     onewirefound = true;
+    temp1 = 0;  //reset all saved temperatures
+    temp2 = 0;
+    temp3 = 0;
+    calibrationMode = true;  //we're in Calibration town baby
+    //temperatureSensors.onTemperatureChange(handleTemperatureChange);
+    tft.fillScreen(TFT_PURPLE);
+    tft.setCursor(0, 0);
+    tft.setTextFont(1);
+    tft.println("Calibration Mode!");
+    tft.println("To begin, connect 1 meat probe in the left hole, immerse it and the calibration probe in a small cup of hot freshly boiled water (>75C), then press any button.");
+    while (digitalRead(rotbutton)) {} //wait until a button is pressed
   }
+  ArduinoOTA.setHostname("mrmeat3");
+  ArduinoOTA.begin();
+  
+
+  Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
+  Blynk.connect();  //Init Blynk
+
+
 }
 
-void doDisplay() {
-  img.fillSprite(TFT_BLUE);
-  img.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
-  img.setTextColor(TFT_WHITE, TFT_BLUE);
-  img.setTextSize(1);
-  img.setCursor(0, 0);
-  img.print("Rotary count: ");
-  img.println(count);
-  img.print("Step count: ");
-  img.println(count / 4); // divide by 4 to get the step count
-  if (!digitalRead(rotbutton)) {
-    img.setTextColor(TFT_RED, TFT_BLUE);
-    img.println("Button pressed!");
-    if (!BMP.done()) {
-      BMP.flush(); // Stop playback
-    } else {
-      BMP.flush(); // Stop any existing output, reset for new file
-      BMP.write(RingOfFire, sizeof(RingOfFire));
-    }
-  } else {
-    img.setTextColor(TFT_WHITE, TFT_BLUE);
-    img.println("Button not pressed");
-  }
 
-  if (!BMP.done()) {
-    img.setTextColor(TFT_GREEN, TFT_BLUE);
-    img.println("Playing...");
-  } else {
-    img.setTextColor(TFT_YELLOW, TFT_BLUE);
-    img.println("Not playing");
-  }
-  img.println("A0 v: " + String(tempA0f, 3) + " f");
-  img.println("A0 c: " + String(tempA0, 3) + " C");
-  img.println("A1 v: " + String(tempA1f, 3) + " f");
-  img.println("A1 c: " + String(tempA1, 3) + " C");
-  img.println("A2 Voltage: " + String(volts2, 3) + " V");
-  if (onewirefound) {
-    sensors.requestTemperatures(); 
-    onewiretempC = sensors.getTempCByIndex(0);
-    img.println("OneWire Temp: " + String(onewiretempC, 2) + " C");
-  }
 
+void doSound() { //play the sound
+  if (BMP.done()) {
+  BMP.flush(); // Stop any existing output, reset for new file
+  BMP.write(RingOfFire, sizeof(RingOfFire));
+  }
   
-  // Draw the sprite to the display
-  img.pushSprite(0, 0);
-  
+}
 
+void savePrefs() { //save settings routine
+  if (setFGC == setBGC) {setFGC = 15; setBGC = 0;}
+  preferences.begin("my-app", false);
+  preferences.putInt("setAlarm", setAlarm);
+  preferences.putInt("setUnits", setUnits);
+  preferences.putInt("setFGC", setFGC);
+  preferences.putInt("setBGC", setBGC);
+  preferences.putInt("setVolume", setVolume); 
+  preferences.putInt("setIcons", setIcons);
+  preferences.putInt("setLEDmode", setLEDmode);
+  preferences.putInt("settemp", settemp);
+  preferences.end();
+  
 }
 
 void loop() {
+  settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
+  ArduinoOTA.handle();
   doADC();
-  doDisplay();
+  Blynk.run();
+  every(2000) {
+    rssi = WiFi.RSSI(); //every 2 seconds update the wifi signal strength variable
+    if (calibrationMode) {sensors.requestTemperatures(); onewiretempC = sensors.getTempCByIndex(0);}
+  }
+
+  every(10000) {       //every 10 seconds
+    barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
+    if (is2connected) {Blynk.virtualWrite(V4, tempA1f);}
+    Blynk.virtualWrite(V2, tempA0f);
+    Blynk.virtualWrite(V5, volts2);
+  }
+
+  settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
+  if (adc0 < is2connectedthreshold) {is1connected = true;} else {is1connected = false;} //check for probe2 connection
+  if (adc1 < is2connectedthreshold) {is2connected = true;} else {is2connected = false;} //check for probe2 connection
+
+  every(5){ //every 5 milliseconds, so we don't waste battery power
+   if (!calibrationMode) {  //if it's not calibration town
+      if (!settingspage) {drawTemps();}  //if we're not in settings mode, draw the main screen
+      else {drawSettings();} //else draw the settings screen
+      }
+    else {
+      //drawCalib();
+      } //else draw the calibration screen
+  }
+
+  every(250){
+    animStep++;
+    if (animStep > 4) {animStep = 1;} //reset the animation step
+  }
+
+  if (((tempA0f >= settemp) ||  (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0)) {  //If 2nd probe is connected and either temp goes above set temp
+    //doSound(); //sound the alarm
+  }
+  int ETA_INTERVAL = 15;
+  every (15000) {  //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
+    tempdiff = tempA0f - oldtemp;
+    if (is2connected) {  //If 2nd probe is connected, calculate whichever ETA is sooner in seconds
+      tempdiff2 = tempA1f - oldtemp2;
+      eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
+      eta2 = (((settemp - tempA1f)/tempdiff2) * ETA_INTERVAL);
+      if ((eta2 > 0) && (eta2 < 1000) && (eta2 < eta)) {eta = eta2;}
+      oldtemp2 = tempA1f;
+    }
+    else  //Else if only one probe is connected, calculate the ETA in seconds
+    {
+      eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
+    }
+    etamins = eta / 60;  //cast it to int and divide it by 60 to get minutes with no remainder, ignore seconds because of inaccuracy
+    oldtemp = tempA0f;
+  }
 }
