@@ -32,7 +32,7 @@
 #define AA_FONT_LARGE SegoeUI_Bold_48
 
 ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
-
+bool connected = false;
 bool saved = false;
 const char *ssid = STASSID;
 const char *pass = STAPSK;
@@ -883,13 +883,8 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
   rssi = WiFi.RSSI();
-  ArduinoOTA.setHostname("mrmeat3");
-  ArduinoOTA.begin();
-  
-  Serial.println("Connecting blynk...");
-  Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
-  Blynk.connect();  //Init Blynk
-  Serial.println("Blynk connected.");
+
+
 
   sensors.begin();
   sensors.setResolution(11);
@@ -969,8 +964,23 @@ void savePrefs() { //save settings routine
 
 
 void loop() {
+
+  if ((WiFi.status() == WL_CONNECTED) && (!connected)) {
+    connected = true;
+
+    ArduinoOTA.setHostname("MrMeat3");
+    ArduinoOTA.begin();
+
+  
+    Serial.println("Connecting blynk...");
+    Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
+    Blynk.connect();  //Init Blynk
+    Serial.println("Blynk connected.");
+  }
+
   settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
-  if (WiFi.status() == WL_CONNECTED) {
+
+  if ((WiFi.status() == WL_CONNECTED) && (connected))  {
     ArduinoOTA.handle();
     Blynk.run();
   }
