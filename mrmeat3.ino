@@ -7,24 +7,24 @@
 #include <DallasTemperature.h>
 #include <Preferences.h>
 #include <BlynkSimpleEsp32.h>
-#include <ArduinoOTA.h>
+//#include <ArduinoOTA.h>
 #include "Fonts/SegoeUI_Bold_48.h"
 #include <BlynkSimpleEsp32.h>
 #include <SPI.h>
-#include <LittleFS.h>
-#include <BackgroundAudioSpeech.h>
-#include <libespeak-ng/voice/en.h>
 #include <SteinhartHart.h>
 #include <ESP32I2SAudio.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <BackgroundAudio.h>
-#include <nvs_flash.h>
-#include <JohnnyCash.h>
+#include <LittleFS.h>
+//#include <JohnnyCash.h>
+//#include <eatit.h>
 #define STASSID "mikesnet"
 #define STAPSK "springchicken"
 #include<ADS1115_WE.h> 
 #include<Wire.h>
+//#include <BackgroundAudioSpeech.h>
+//#include <libespeak-ng/voice/en.h>
 
 
 #define I2C_ADDRESS 0x48
@@ -33,13 +33,14 @@
 
 ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
 
-
+bool saved = false;
 const char *ssid = STASSID;
 const char *pass = STAPSK;
 
 ESP32I2SAudio audio(2, 3, 0); // BCLK, LRCLK, DOUT (,MCLK)
 
-ROMBackgroundAudioWAV BMP(audio);
+BackgroundAudioWAV BMP(audio);
+//BackgroundAudioSpeech BMP(audio);
 
 char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 
@@ -47,7 +48,7 @@ char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 #define rotRpin 20
 #define rotbutton 5
 #define onewirepin 7
-#define is2connectedthreshold 15000 
+#define is2connectedthreshold 24000 
 
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
@@ -60,7 +61,10 @@ float volts0, volts1, volts2, volts3;
 int channel = 1;
 bool onewirefound = false;
 bool calibrationMode = false;
+bool playSound = false;
 bool isPlaying = false;
+bool bmp1began = false;
+bool bmpdone = true;
 int animpos = 80;
 
 SteinhartHart thermistor(15062.08,36874.80,82837.54, 348.15, 323.15, 303.15); //these are the default values for a Weber probe
@@ -77,10 +81,38 @@ volatile long enc_count = 0;
 
 #define TFT_GREY 0x5AEB // New colour
 
+File f;
+    const size_t bufsize = 512;
+    uint8_t buf[bufsize];
+
 void waitForButtonsReleased() {
   while (!digitalRead(rotbutton)) {
     delay(10); // debounce delay
   }
+}
+
+void playWavFromFS(const char* filename) {
+  Serial.println("Playing WAV file from LittleFS...");
+    f = LittleFS.open(filename, "r");
+    if (!f) {
+        Serial.println("Failed to open WAV file!");
+        return;
+    }
+    Serial.println("Flushing...");
+    BMP.flush();
+    Serial.println("Flushed.");
+
+  while (f.available()) {
+    // Wait until enough space is available in the buffer
+    while (BMP.availableForWrite() < bufsize) {
+      delay(1);
+    }
+    int len = f.read(buf, bufsize);
+    if (len > 0) {
+      BMP.write(buf, len);
+    }
+  }
+  f.close();
 }
 
 
@@ -240,7 +272,10 @@ void drawWiFiSignalStrength(int32_t x, int32_t y, int32_t radius) { //chatGPT-ge
     }
 }
 
-
+double ADSToOhms(float ADSreading) { //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
+      float voltsX = ADSreading;
+      return (voltsX * 22000) / (3.3 - voltsX);
+}
 
 
 void drawTemps() { //main screen
@@ -329,7 +364,7 @@ void drawTemps() { //main screen
     int hours = minsLeft / 60;
     int mins = (int)minsLeft % 60;
     img.setCursor(1, 153);
-    img.printf("Batt: %dh:%dmin", hours, mins);
+    img.printf("Batt: %dh:%dm", hours, mins);
     img.setTextDatum(BR_DATUM);
     img.drawRect(110,153,16,6,cmap[setFGC]); // moved right 3 more pixels
     img.fillRect(110,153,barx,6,cmap[setFGC]);
@@ -413,7 +448,7 @@ void doADC() {  //take measurements from the ADC without blocking
       tempA0 = thermistor.resistanceToTemperature(ADSToOhms(volts0));
       if (setUnits == 0) {tempA0f = tempA0 - 273.15;}
       else if (setUnits == 1) {
-        tempA0f = (tempA0 * 1.8) + 32;
+        tempA0f = ((tempA0 - 273.15) * 1.8) + 32;
       }
       else if (setUnits == 2) {tempA0f = tempA0;}
       adc.setCompareChannels(ADS1115_COMP_1_GND);
@@ -427,7 +462,7 @@ void doADC() {  //take measurements from the ADC without blocking
       tempA1 = thermistor.resistanceToTemperature(ADSToOhms(volts1));
       if (setUnits == 0) {tempA1f = tempA1 - 273.15;}
       else if (setUnits == 1) {
-        tempA1f = (tempA1 * 1.8) + 32;
+        tempA1f = ((tempA1 - 273.15) * 1.8) + 32;
       }
       else if (setUnits == 2) {tempA1f = tempA1;}
       adc.setCompareChannels(ADS1115_COMP_2_GND);
@@ -445,10 +480,7 @@ void doADC() {  //take measurements from the ADC without blocking
   }
 }
 
-double ADSToOhms(float ADSreading) { //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
-      float voltsX = ADSreading;
-      return (voltsX * 22000) / (3.3 - voltsX);
-}
+
 
 double mapf(float x, float in_min, float in_max, float out_min, float out_max)  //like default map function but returns float instead of int
 {
@@ -538,8 +570,8 @@ if (!editMode) {
     if (b1pressed) {
       editMode = true;
       editSelection = setSelection;
-     if (setSelection == 7) { doSound(); b1pressed = false; }
-     if (setSelection == 8) { savePrefs(); settingspage = false; b1pressed = false; waitForButtonsReleased(); }
+     if (setSelection == 7) { playSound = true; b1pressed = false; editMode = false; }
+     if (setSelection == 8) { savePrefs(); settingspage = false; b1pressed = false; editMode = false; waitForButtonsReleased(); }
    
       b1pressed = false;
       // Optionally, store the base count for this value if you want to "snap" to current value
@@ -633,8 +665,8 @@ if (!editMode) {
   }
 
   // Special actions for Test Spk and Save
-  if (setSelection == 7 && !editMode && b1pressed) { doSound(); b1pressed = false; }
-  if (setSelection == 8 && !editMode && b1pressed) { savePrefs(); b1pressed = false; waitForButtonsReleased(); }
+  if (setSelection == 7 && !editMode && b1pressed) { playSound = true; b1pressed = false; editMode = false; }
+  if (setSelection == 8 && !editMode && b1pressed) { savePrefs(); b1pressed = false; editMode = false; waitForButtonsReleased(); }
 
   // Draw sample string
   img.setTextDatum(TC_DATUM);
@@ -649,6 +681,10 @@ if (!editMode) {
 
 void setup() {
   initializeCmap();
+  LittleFS.begin();
+    BMP.begin();
+    
+    BMP.setGain(0.1);
   thermistor.calcCoefficients();
   pinMode(rotLpin, INPUT_PULLUP);
   pinMode(rotRpin, INPUT_PULLUP);
@@ -666,10 +702,12 @@ void setup() {
     Serial.println("ADS1115 not connected!");
   }
   adc.setVoltageRange_mV(ADS1115_RANGE_4096); // Set voltage range to 0-4.096V
+  adc.setConvRate(ADS1115_8_SPS); 
+  Serial.println("Loading prefs");
   preferences.begin("my-app", false); //read preferences from flash, with default values if none are found
-  temp1 = preferences.getFloat("temp1", 0);
-  temp2 = preferences.getFloat("temp2", 0);
-  temp3 = preferences.getFloat("temp3", 0);
+  temp1 = preferences.getInt("temp1", 0);
+  temp2 = preferences.getInt("temp2", 0);
+  temp3 = preferences.getInt("temp3", 0);
   therm1 = preferences.getInt("therm1", 0);
   therm2 = preferences.getInt("therm2", 0);
   therm3 = preferences.getInt("therm3", 0);
@@ -695,19 +733,36 @@ void setup() {
   img.setColorDepth(8);  //WE DONT HAVE ENOUGH RAM LEFT FOR 16 BIT AND JOHNNY CASH, MUST USE 8 BIT COLOUR!
   img.createSprite(128, 160);
   img.fillSprite(TFT_BLUE);
-  BMP.begin();
-  BMP.setGain(0.1);
-  
+
   oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
   oldtemp2 = tempA1f;
   forceADC(); 
   drawTemps();
-
+ Serial.println("Starting wifi");
 WiFi.mode(WIFI_STA);  //precharge the wifi
   WiFiManager wm;  //FIRE UP THE WIFI MANAGER SYSTEM FOR WIFI PROVISIONING
+  
   if ((!digitalRead(rotbutton)) || !wm.getWiFiIsSaved()){  //If either both buttons are pressed on bootup OR no wifi info is saved
-    nvs_flash_erase(); // erase the NVS partition to wipe all settings
-    nvs_flash_init(); // initialize the NVS partition.
+  Serial.println("Resetting stuff");
+    //nvs_flash_erase(); // erase the NVS partition to wipe all settings
+    //nvs_flash_init(); // initialize the NVS partition.
+    preferences.begin("my-app", false); //read preferences from flash, with default values if none are found
+     preferences.putInt("temp1", 0);
+     preferences.putInt("temp2", 0);
+     preferences.putInt("temp3", 0);
+     preferences.putInt("therm1", 0);
+     preferences.putInt("therm2", 0);
+     preferences.putInt("therm3", 0);
+     preferences.putInt("setAlarm", 0);
+     preferences.putInt("setUnits", 1);
+     preferences.putInt("setFGC", 12);
+     preferences.putInt("setBGC", 4);
+     preferences.putInt("setVolume", 100);
+     preferences.putInt("setLEDmode", 2);
+     preferences.putInt("setIcons", 1);
+     preferences.putInt("count", 580);
+    preferences.end();
+    Serial.println("Prefs reset");
     tft.fillScreen(TFT_ORANGE);
     tft.setCursor(0, 0);
     tft.setTextFont(1);
@@ -725,7 +780,7 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     // res = wm.autoConnect(); // auto generated AP name from chipid
     // res = wm.autoConnect("AutoConnectAP"); // anonymous ap
     res = wm.autoConnect("MrMeat3 Setup"); 
-
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     if(!res) {  //if the wifi manager failed to connect to wifi
         tft.fillScreen(TFT_RED);
         tft.setCursor(0, 0);
@@ -744,14 +799,21 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     }
   }
   else {  //if wifi information was saved, use it
+  Serial.println("Wifi information found, using...");
     WiFi.begin(wm.getWiFiSSID(), wm.getWiFiPass());
-
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
   rssi = WiFi.RSSI();
-  //BMP.flush(); // Stop any existing output, reset for new file
-  // Force an initial ADC read to populate the values
-  //BMP.write(RingOfFire, sizeof(RingOfFire));
+  //ArduinoOTA.setHostname("mrmeat3");
+  //ArduinoOTA.begin();
+  
+  Serial.println("Connecting blynk...");
+  Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
+  Blynk.connect();  //Init Blynk
+  Serial.println("Blynk connected.");
+
   sensors.begin();
+  sensors.setResolution(11);
   if (findDevices(onewirepin) > 0) //check and see if the probe is connected, if it is,
   {
     onewirefound = true;
@@ -765,14 +827,12 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     tft.setTextFont(1);
     tft.println("Calibration Mode!");
     tft.println("To begin, connect 1 meat probe in the left hole, immerse it and the calibration probe in a small cup of hot freshly boiled water (>75C), then press any button.");
-    while (digitalRead(rotbutton)) {} //wait until a button is pressed
+    while (digitalRead(rotbutton)) {delay(1);} //wait until a button is pressed
   }
-  ArduinoOTA.setHostname("mrmeat3");
-  ArduinoOTA.begin();
-  
+  else {
+    Serial.println("No onewire probes found.");
+  }
 
-  Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
-  Blynk.connect();  //Init Blynk
 
 
 }
@@ -780,11 +840,22 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
 
 
 void doSound() { //play the sound
-  if (BMP.done()) {
-  BMP.flush(); // Stop any existing output, reset for new file
-  BMP.write(RingOfFire, sizeof(RingOfFire));
-  }
-  
+  if (playSound) {  //if sound is enabled
+  Serial.println("Playing sound");
+        playSound = false;
+        switch (setAlarm) {
+          case 0:
+              Serial.println("Playing 0");
+              //BMP.end();
+              playWavFromFS("/ringoffire.wav");
+              break;
+          case 1:
+              Serial.println("Playing 1");
+              //BMP.end();
+              playWavFromFS("/weirdal.wav");
+              break;
+        }
+      }
 }
 
 void savePrefs() { //save settings routine
@@ -802,17 +873,104 @@ void savePrefs() { //save settings routine
   
 }
 
+void drawCalib(){  //if we're in calibration mode
+  img.fillSprite(TFT_MAROON); //fill the sprite ya maroon
+  img.setTextSize(1);
+  img.setTextColor(TFT_WHITE, TFT_BLACK, true);
+  img.setTextWrap(true); // Wrap on width
+  img.setTextFont(1);
+  img.setTextDatum(TL_DATUM);
+  img.setCursor(0,0);
+  img.println("Calibrating!");
+  img.setTextSize(1);
+  img.setCursor(0,150);
+  img.println("Please wait for all 3 temperature points to be measured...");
+  img.setTextSize(1);
+
+
+   dallasString = String(onewiretempC, 2) + " C, A0: " + String(ADSToOhms(volts0));  //draw the calibration probe temp and meat probe resistance in ohms
+  img.drawString(dallasString, 0,20);
+
+  if ((onewiretempC >= 75.0) && (onewiretempC <= 75.2)) { //grab a measurement when we're within 0.2C of 75C, wide range in case we're dropping fast
+    temp1 = onewiretempC;  //remember which temperature we used
+    therm1 = ADSToOhms(volts0); //and apply this raw meat probe reading
+  }
+  if ((onewiretempC >= 50.0) && (onewiretempC <= 50.2)) { 
+    temp2 = onewiretempC;
+    therm2 = ADSToOhms(volts0);
+  }
+  if ((onewiretempC >= 30.0) && (onewiretempC <= 30.2)) { 
+    temp3 = onewiretempC;
+    therm3 = ADSToOhms(volts0);
+  }
+
+     temp1string = "75C = " +String(therm1);
+    img.drawString(temp1string, 0,40);  //draw those readings
+
+     temp2string = "50C = " +String(therm2);
+    img.drawString(temp2string, 0,60);
+
+     temp3string = "30C = " +String(therm3);
+    img.drawString(temp3string, 0,80);
+
+  if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //when we've taken 3 readings
+
+        if (!saved) {  //save it only once
+          //digitalWrite(MUTE_PIN, HIGH);  //speaker didn't work in this mode
+          thermistor.setTemperature1(temp1 + 273.15);  //save the temperatures and raw readings
+          thermistor.setTemperature2(temp2 + 273.15);
+          thermistor.setTemperature3(temp3 + 273.15);
+          thermistor.setResistance1(therm1);
+          thermistor.setResistance2(therm2);
+          thermistor.setResistance3(therm3);
+          thermistor.calcCoefficients();  //calculate steinhart-hart coefficients for these 3 readings
+           coeffAstring = "A: " + String(thermistor.getCoeffA(), 5); //print them
+           coeffBstring = "B: " + String(thermistor.getCoeffB(), 5);
+           coeffCstring = "C: " + String(thermistor.getCoeffC(), 5);
+
+          preferences.begin("my-app", false); //save them
+          preferences.putInt("temp1", temp1);
+          preferences.putInt("temp2", temp2);
+          preferences.putInt("temp3", temp3);
+          preferences.putInt("therm1", therm1);
+          preferences.putInt("therm2", therm2);
+          preferences.putInt("therm3", therm3);
+          preferences.end();
+          saved = true;
+             // if(Music.Playing==false) {DacAudio.Play(&Music);}
+        }
+        img.fillSprite(TFT_GREEN);
+        img.setCursor(0,0);
+        img.println("Calibration saved, please reboot!");
+        img.setTextSize(2);
+
+        img.drawString(temp1string, 0,40);
+        img.drawString(temp2string, 0,60);
+        img.drawString(temp3string, 0,80);
+        img.drawString(coeffAstring, 0,100);
+        img.drawString(coeffBstring, 0,120);
+        img.drawString(coeffCstring, 0,140);
+
+  }
+  img.pushSprite(0, 0);  //draw it all
+}
+
 void loop() {
   settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
-  ArduinoOTA.handle();
+  if (WiFi.status() == WL_CONNECTED) {
+    //ArduinoOTA.handle();
+    Blynk.run();
+  }
   doADC();
-  Blynk.run();
+  doSound(); //play the sound if needed
+  
   every(2000) {
-    rssi = WiFi.RSSI(); //every 2 seconds update the wifi signal strength variable
+     //every 2 seconds update the wifi signal strength variable
     if (calibrationMode) {sensors.requestTemperatures(); onewiretempC = sensors.getTempCByIndex(0);}
   }
 
-  every(10000) {       //every 10 seconds
+  every(30000) {       //every 10 seconds
+    
     barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
     if (is2connected) {Blynk.virtualWrite(V4, tempA1f);}
     Blynk.virtualWrite(V2, tempA0f);
@@ -829,7 +987,7 @@ void loop() {
       else {drawSettings();} //else draw the settings screen
       }
     else {
-      //drawCalib();
+        drawCalib();
       } //else draw the calibration screen
   }
 
@@ -839,23 +997,25 @@ void loop() {
   }
 
   if (((tempA0f >= settemp) ||  (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0)) {  //If 2nd probe is connected and either temp goes above set temp
-    //doSound(); //sound the alarm
+    playSound = true;
   }
   int ETA_INTERVAL = 15;
   every (15000) {  //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
-    tempdiff = tempA0f - oldtemp;
-    if (is2connected) {  //If 2nd probe is connected, calculate whichever ETA is sooner in seconds
-      tempdiff2 = tempA1f - oldtemp2;
-      eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
-      eta2 = (((settemp - tempA1f)/tempdiff2) * ETA_INTERVAL);
-      if ((eta2 > 0) && (eta2 < 1000) && (eta2 < eta)) {eta = eta2;}
-      oldtemp2 = tempA1f;
+  if (!calibrationMode) { 
+      tempdiff = tempA0f - oldtemp;
+      if (is2connected) {  //If 2nd probe is connected, calculate whichever ETA is sooner in seconds
+        tempdiff2 = tempA1f - oldtemp2;
+        eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
+        eta2 = (((settemp - tempA1f)/tempdiff2) * ETA_INTERVAL);
+        if ((eta2 > 0) && (eta2 < 1000) && (eta2 < eta)) {eta = eta2;}
+        oldtemp2 = tempA1f;
+      }
+      else  //Else if only one probe is connected, calculate the ETA in seconds
+      {
+        eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
+      }
+      etamins = eta / 60;  //cast it to int and divide it by 60 to get minutes with no remainder, ignore seconds because of inaccuracy
+      oldtemp = tempA0f;
     }
-    else  //Else if only one probe is connected, calculate the ETA in seconds
-    {
-      eta = (((settemp - tempA0f)/tempdiff) * ETA_INTERVAL);
-    }
-    etamins = eta / 60;  //cast it to int and divide it by 60 to get minutes with no remainder, ignore seconds because of inaccuracy
-    oldtemp = tempA0f;
   }
 }
