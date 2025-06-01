@@ -77,7 +77,7 @@ volatile int count = 580;     // current rotary count
 volatile int downcount = 0;     // current rotary count
 volatile int upcount = 0;     // current rotary count
          int old_count;     // old rotary count
-volatile long enc_count = 0;
+volatile int enc_count = 0;
 
 #define TFT_GREY 0x5AEB // New colour
 
@@ -214,7 +214,7 @@ int setAlarm, setUnits;
 int setBGC = 15; //background color
 int setFGC = 0;
 int setVolume = 100;
-int setLEDmode = 0;
+
 int rssi;
 
 bool b1pressed = false;
@@ -282,6 +282,7 @@ void drawTemps() { //main screen
  
     if (!digitalRead(rotbutton)) { //if both are pressed at the same time
       settingspage = true;  //go to settings page 
+      enc_count = count;
       waitForButtonsReleased();
     }
   
@@ -364,7 +365,9 @@ void drawTemps() { //main screen
     int hours = minsLeft / 60;
     int mins = (int)minsLeft % 60;
     img.setCursor(1, 153);
-    img.printf("Batt: %dh:%dm", hours, mins);
+    char battString[20];
+    snprintf(battString, sizeof(battString), "Batt: %dh:%dm", hours, mins);
+    img.printf("%s", battString);
     img.setTextDatum(BR_DATUM);
     img.drawRect(110,153,16,6,cmap[setFGC]); // moved right 3 more pixels
     img.fillRect(110,153,barx,6,cmap[setFGC]);
@@ -565,13 +568,13 @@ if (!editMode) {
       setSelection++;
       rotRight = false;  //reset flag
     }
-    if (setSelection < 0) setSelection = 8;  //wrap around on the 0th menu item
-    if (setSelection > 8) setSelection = 0;  //wrap around on the 8th menu item
+    if (setSelection < 0) setSelection = 7;  //wrap around on the 0th menu item
+    if (setSelection > 7) setSelection = 0;  //wrap around on the 8th menu item
     if (b1pressed) {
       editMode = true;
       editSelection = setSelection;
-     if (setSelection == 7) { playSound = true; b1pressed = false; editMode = false; }
-     if (setSelection == 8) { savePrefs(); settingspage = false; b1pressed = false; editMode = false; waitForButtonsReleased(); }
+     if (setSelection == 6) { playSound = true; b1pressed = false; editMode = false; }
+     if (setSelection == 7) { savePrefs(); settingspage = false; count = enc_count; b1pressed = false; editMode = false; waitForButtonsReleased(); }
    
       b1pressed = false;
       // Optionally, store the base count for this value if you want to "snap" to current value
@@ -603,10 +606,7 @@ if (!editMode) {
         if (rotLeft) { setIcons = (setIcons + 2) % 3; rotLeft = false; }
         if (rotRight) { setIcons = (setIcons + 1) % 3; rotRight = false; }
         break;
-      case 6: // LED Mode
-        if (rotLeft) { setLEDmode = (setLEDmode + 3) % 4; rotLeft = false; }
-        if (rotRight) { setLEDmode = (setLEDmode + 1) % 4; rotRight = false; }
-        break;
+
   // Special actions for Test Spk and Save
     }
     if (b1pressed) {
@@ -616,7 +616,7 @@ if (!editMode) {
   }
 
 // Draw menu items
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < 8; i++) {
     if (setSelection == i && !editMode) {
       img.setTextColor(TFT_BLACK, TFT_WHITE, true);
     } else {
@@ -629,15 +629,14 @@ if (!editMode) {
       case 3: img.println("FG Colour:"); break;
       case 4: img.println("Volume:"); break;
       case 5: img.println("Icons:"); break;
-      case 6: img.println("LED Mode:"); break;
-      case 7: img.println(">Test Spk<"); break;
-      case 8: img.println(">Save<"); break;
+      case 6: img.println(">Test Spk<"); break;
+      case 7: img.println(">Save<"); break;
     }
   }
 
   // Draw values on right, highlight if in edit mode
   img.setTextDatum(TR_DATUM);
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < 8; i++) {
     int y = i * 8;
     bool highlight = (editMode && editSelection == i);
     if (highlight) img.setTextColor(TFT_BLACK, TFT_WHITE, true);
@@ -646,7 +645,7 @@ if (!editMode) {
     switch (i) {
       case 0: img.drawNumber(setAlarm, 128, y); break;
       case 1: {
-        String setUnitString = (setUnits == 0) ? "C" : (setUnits == 1) ? "F" : "K";
+        const char* setUnitString = (setUnits == 0) ? "C" : (setUnits == 1) ? "F" : "K";
         img.drawString(setUnitString, 128, y);
         break;
       }
@@ -654,37 +653,116 @@ if (!editMode) {
       case 3: img.drawNumber(setFGC, 128, y); break;
       case 4: img.drawNumber(setVolume, 128, y); break;
       case 5: {
-        String setIconString = (setIcons == 0) ? "T" : (setIcons == 1) ? "Y" : "B";
+        const char* setIconString = (setIcons == 0) ? "T" : (setIcons == 1) ? "Y" : "B";
         img.drawString(setIconString, 128, y);
         break;
       }
-      case 6: img.drawNumber(setLEDmode, 128, y); break;
-      case 7: break; // Test Spk, no value
-      case 8: break; // Save, no value
+      case 6: break; // Test Spk, no value
+      case 7: break; // Save, no value
     }
   }
 
   // Special actions for Test Spk and Save
-  if (setSelection == 7 && !editMode && b1pressed) { playSound = true; b1pressed = false; editMode = false; }
-  if (setSelection == 8 && !editMode && b1pressed) { savePrefs(); b1pressed = false; editMode = false; waitForButtonsReleased(); }
+  if (setSelection == 6 && !editMode && b1pressed) { playSound = true; b1pressed = false; editMode = false; }
+  if (setSelection == 7 && !editMode && b1pressed) { savePrefs(); b1pressed = false; editMode = false; waitForButtonsReleased(); }
 
   // Draw sample string
   img.setTextDatum(TC_DATUM);
   img.setTextColor(cmap[setFGC], cmap[setBGC], true);
-  String sampleString = String(setFGC) + cmapNames[setFGC];
+  char sampleString[32];
+  snprintf(sampleString, sizeof(sampleString), "%d%s", setFGC, cmapNames[setFGC]);
   img.drawString(sampleString, 64, 140);
 
-  img.pushSprite(0, 0);  //draw everything
+  img.pushSprite(0, 0);
 }
 
+// --- drawCalib ---
+void drawCalib() {
+    img.fillSprite(TFT_MAROON);
+    img.setTextSize(1);
+    img.setTextColor(TFT_WHITE, TFT_BLACK, true);
+    img.setTextWrap(true);
+    img.setTextFont(1);
+    img.setTextDatum(TL_DATUM);
+    img.setCursor(0,0);
+    img.println("Calibrating!");
+    img.setTextSize(1);
+    img.setCursor(0,150);
+    img.println("Please wait for all 3 temperature points to be measured...");
+    img.setTextSize(1);
 
+    char dallasString[32];
+    snprintf(dallasString, sizeof(dallasString), "%.2f C, A0: %.2f", onewiretempC, ADSToOhms(volts0));
+    img.drawString(dallasString, 0,20);
+
+    if ((onewiretempC >= 75.0) && (onewiretempC <= 75.2)) {
+        temp1 = onewiretempC;
+        therm1 = ADSToOhms(volts0);
+    }
+    if ((onewiretempC >= 50.0) && (onewiretempC <= 50.2)) {
+        temp2 = onewiretempC;
+        therm2 = ADSToOhms(volts0);
+    }
+    if ((onewiretempC >= 30.0) && (onewiretempC <= 30.2)) {
+        temp3 = onewiretempC;
+        therm3 = ADSToOhms(volts0);
+    }
+
+    char temp1string[24], temp2string[24], temp3string[24];
+    snprintf(temp1string, sizeof(temp1string), "75C = %.2f", therm1);
+    snprintf(temp2string, sizeof(temp2string), "50C = %.2f", therm2);
+    snprintf(temp3string, sizeof(temp3string), "30C = %.2f", therm3);
+    img.drawString(temp1string, 0,40);
+    img.drawString(temp2string, 0,60);
+    img.drawString(temp3string, 0,80);
+
+    if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {
+        if (!saved) {
+            thermistor.setTemperature1(temp1 + 273.15);
+            thermistor.setTemperature2(temp2 + 273.15);
+            thermistor.setTemperature3(temp3 + 273.15);
+            thermistor.setResistance1(therm1);
+            thermistor.setResistance2(therm2);
+            thermistor.setResistance3(therm3);
+            thermistor.calcCoefficients();
+
+            char coeffAstring[32], coeffBstring[32], coeffCstring[32];
+            snprintf(coeffAstring, sizeof(coeffAstring), "A: %.5f", thermistor.getCoeffA());
+            snprintf(coeffBstring, sizeof(coeffBstring), "B: %.5f", thermistor.getCoeffB());
+            snprintf(coeffCstring, sizeof(coeffCstring), "C: %.5f", thermistor.getCoeffC());
+
+            preferences.begin("my-app", false);
+            preferences.putInt("temp1", temp1);
+            preferences.putInt("temp2", temp2);
+            preferences.putInt("temp3", temp3);
+            preferences.putInt("therm1", therm1);
+            preferences.putInt("therm2", therm2);
+            preferences.putInt("therm3", therm3);
+            preferences.end();
+            saved = true;
+
+            img.fillSprite(TFT_GREEN);
+            img.setCursor(0,0);
+            img.println("Calibration saved, please reboot!");
+            img.setTextSize(2);
+
+            img.drawString(temp1string, 0,40);
+            img.drawString(temp2string, 0,60);
+            img.drawString(temp3string, 0,80);
+            img.drawString(coeffAstring, 0,100);
+            img.drawString(coeffBstring, 0,120);
+            img.drawString(coeffCstring, 0,140);
+        }
+    }
+    img.pushSprite(0, 0);
+}
 
 void setup() {
   initializeCmap();
   LittleFS.begin();
-    BMP.begin();
-    
-    BMP.setGain(0.1);
+  BMP.begin();
+  
+  BMP.setGain(0.5);
   thermistor.calcCoefficients();
   pinMode(rotLpin, INPUT_PULLUP);
   pinMode(rotRpin, INPUT_PULLUP);
@@ -716,7 +794,7 @@ void setup() {
   setFGC = preferences.getInt("setFGC", 12);
   setBGC = preferences.getInt("setBGC", 4);
   setVolume = preferences.getInt("setVolume", 100);
-  setLEDmode = preferences.getInt("setLEDmode", 2);
+  //setLEDmode = preferences.getInt("setLEDmode", 2);
   setIcons = preferences.getInt("setIcons", 1);
   count = preferences.getInt("count", 580);
   preferences.end();
@@ -758,7 +836,7 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
      preferences.putInt("setFGC", 12);
      preferences.putInt("setBGC", 4);
      preferences.putInt("setVolume", 100);
-     preferences.putInt("setLEDmode", 2);
+     //preferences.putInt("setLEDmode", 2);
      preferences.putInt("setIcons", 1);
      preferences.putInt("count", 580);
     preferences.end();
@@ -854,6 +932,21 @@ void doSound() { //play the sound
               //BMP.end();
               playWavFromFS("/weirdal.wav");
               break;
+          case 2:
+              Serial.println("Playing 2");
+              //BMP.end();
+              playWavFromFS("/shave.wav");
+              break;
+          case 3:
+              Serial.println("Playing 3");
+              //BMP.end();
+              playWavFromFS("/suppertime.wav");
+              break;
+          case 4:
+              Serial.println("Playing 4");
+              //BMP.end();
+              playWavFromFS("/dingfries.wav");
+              break;
         }
       }
 }
@@ -867,93 +960,12 @@ void savePrefs() { //save settings routine
   preferences.putInt("setBGC", setBGC);
   preferences.putInt("setVolume", setVolume); 
   preferences.putInt("setIcons", setIcons);
-  preferences.putInt("setLEDmode", setLEDmode);
-  preferences.putInt("settemp", settemp);
+ // preferences.putInt("setLEDmode", setLEDmode);
+  preferences.putInt("count", count);
   preferences.end();
   
 }
 
-void drawCalib(){  //if we're in calibration mode
-  img.fillSprite(TFT_MAROON); //fill the sprite ya maroon
-  img.setTextSize(1);
-  img.setTextColor(TFT_WHITE, TFT_BLACK, true);
-  img.setTextWrap(true); // Wrap on width
-  img.setTextFont(1);
-  img.setTextDatum(TL_DATUM);
-  img.setCursor(0,0);
-  img.println("Calibrating!");
-  img.setTextSize(1);
-  img.setCursor(0,150);
-  img.println("Please wait for all 3 temperature points to be measured...");
-  img.setTextSize(1);
-
-
-   dallasString = String(onewiretempC, 2) + " C, A0: " + String(ADSToOhms(volts0));  //draw the calibration probe temp and meat probe resistance in ohms
-  img.drawString(dallasString, 0,20);
-
-  if ((onewiretempC >= 75.0) && (onewiretempC <= 75.2)) { //grab a measurement when we're within 0.2C of 75C, wide range in case we're dropping fast
-    temp1 = onewiretempC;  //remember which temperature we used
-    therm1 = ADSToOhms(volts0); //and apply this raw meat probe reading
-  }
-  if ((onewiretempC >= 50.0) && (onewiretempC <= 50.2)) { 
-    temp2 = onewiretempC;
-    therm2 = ADSToOhms(volts0);
-  }
-  if ((onewiretempC >= 30.0) && (onewiretempC <= 30.2)) { 
-    temp3 = onewiretempC;
-    therm3 = ADSToOhms(volts0);
-  }
-
-     temp1string = "75C = " +String(therm1);
-    img.drawString(temp1string, 0,40);  //draw those readings
-
-     temp2string = "50C = " +String(therm2);
-    img.drawString(temp2string, 0,60);
-
-     temp3string = "30C = " +String(therm3);
-    img.drawString(temp3string, 0,80);
-
-  if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //when we've taken 3 readings
-
-        if (!saved) {  //save it only once
-          //digitalWrite(MUTE_PIN, HIGH);  //speaker didn't work in this mode
-          thermistor.setTemperature1(temp1 + 273.15);  //save the temperatures and raw readings
-          thermistor.setTemperature2(temp2 + 273.15);
-          thermistor.setTemperature3(temp3 + 273.15);
-          thermistor.setResistance1(therm1);
-          thermistor.setResistance2(therm2);
-          thermistor.setResistance3(therm3);
-          thermistor.calcCoefficients();  //calculate steinhart-hart coefficients for these 3 readings
-           coeffAstring = "A: " + String(thermistor.getCoeffA(), 5); //print them
-           coeffBstring = "B: " + String(thermistor.getCoeffB(), 5);
-           coeffCstring = "C: " + String(thermistor.getCoeffC(), 5);
-
-          preferences.begin("my-app", false); //save them
-          preferences.putInt("temp1", temp1);
-          preferences.putInt("temp2", temp2);
-          preferences.putInt("temp3", temp3);
-          preferences.putInt("therm1", therm1);
-          preferences.putInt("therm2", therm2);
-          preferences.putInt("therm3", therm3);
-          preferences.end();
-          saved = true;
-             // if(Music.Playing==false) {DacAudio.Play(&Music);}
-        }
-        img.fillSprite(TFT_GREEN);
-        img.setCursor(0,0);
-        img.println("Calibration saved, please reboot!");
-        img.setTextSize(2);
-
-        img.drawString(temp1string, 0,40);
-        img.drawString(temp2string, 0,60);
-        img.drawString(temp3string, 0,80);
-        img.drawString(coeffAstring, 0,100);
-        img.drawString(coeffBstring, 0,120);
-        img.drawString(coeffCstring, 0,140);
-
-  }
-  img.pushSprite(0, 0);  //draw it all
-}
 
 void loop() {
   settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
@@ -963,25 +975,8 @@ void loop() {
   }
   doADC();
   doSound(); //play the sound if needed
-  
-  every(2000) {
-     //every 2 seconds update the wifi signal strength variable
-    if (calibrationMode) {sensors.requestTemperatures(); onewiretempC = sensors.getTempCByIndex(0);}
-  }
 
-  every(30000) {       //every 10 seconds
-    
-    barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
-    if (is2connected) {Blynk.virtualWrite(V4, tempA1f);}
-    Blynk.virtualWrite(V2, tempA0f);
-    Blynk.virtualWrite(V5, volts2);
-  }
-
-  settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
-  if (adc0 < is2connectedthreshold) {is1connected = true;} else {is1connected = false;} //check for probe2 connection
-  if (adc1 < is2connectedthreshold) {is2connected = true;} else {is2connected = false;} //check for probe2 connection
-
-  every(5){ //every 5 milliseconds, so we don't waste battery power
+  every(50){ //every 5 milliseconds, so we don't waste battery power
    if (!calibrationMode) {  //if it's not calibration town
       if (!settingspage) {drawTemps();}  //if we're not in settings mode, draw the main screen
       else {drawSettings();} //else draw the settings screen
@@ -999,6 +994,20 @@ void loop() {
   if (((tempA0f >= settemp) ||  (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0)) {  //If 2nd probe is connected and either temp goes above set temp
     playSound = true;
   }
+  
+  every(2000) {
+     //every 2 seconds update the wifi signal strength variable
+    if (calibrationMode) {sensors.requestTemperatures(); onewiretempC = sensors.getTempCByIndex(0);}
+    Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+  }
+
+
+
+  settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
+  if (adc0 < is2connectedthreshold) {is1connected = true;} else {is1connected = false;} //check for probe2 connection
+  if (adc1 < is2connectedthreshold) {is2connected = true;} else {is2connected = false;} //check for probe2 connection
+
+
   int ETA_INTERVAL = 15;
   every (15000) {  //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
   if (!calibrationMode) { 
@@ -1017,5 +1026,13 @@ void loop() {
       etamins = eta / 60;  //cast it to int and divide it by 60 to get minutes with no remainder, ignore seconds because of inaccuracy
       oldtemp = tempA0f;
     }
+  }
+
+  every(30000) {       //every 10 seconds
+    
+    barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
+    if (is2connected) {Blynk.virtualWrite(V4, tempA1f);}
+    Blynk.virtualWrite(V2, tempA0f);
+    Blynk.virtualWrite(V5, volts2);
   }
 }
