@@ -7,7 +7,7 @@
 #include <DallasTemperature.h>
 #include <Preferences.h>
 #include <BlynkSimpleEsp32.h>
-//#include <ArduinoOTA.h>
+#include <ArduinoOTA.h>
 #include "Fonts/SegoeUI_Bold_48.h"
 #include <BlynkSimpleEsp32.h>
 #include <SPI.h>
@@ -599,8 +599,8 @@ if (!editMode) {
         if (rotRight) { setFGC = (setFGC + 1) % 24; rotRight = false; }
         break;
       case 4: // Volume
-        if (rotLeft) { setVolume = (setVolume + 100) % 101; rotLeft = false; }
-        if (rotRight) { setVolume = (setVolume + 1) % 101; rotRight = false; }
+        if (rotLeft) { setVolume = (setVolume + 100) % 101; BMP.setGain(setVolume / 100.0); rotLeft = false; }
+        if (rotRight) { setVolume = (setVolume + 1) % 101; BMP.setGain(setVolume / 100.0); rotRight = false; }
         break;
       case 5: // Icons
         if (rotLeft) { setIcons = (setIcons + 2) % 3; rotLeft = false; }
@@ -762,7 +762,7 @@ void setup() {
   LittleFS.begin();
   BMP.begin();
   
-  BMP.setGain(0.5);
+  
   thermistor.calcCoefficients();
   pinMode(rotLpin, INPUT_PULLUP);
   pinMode(rotRpin, INPUT_PULLUP);
@@ -798,6 +798,7 @@ void setup() {
   setIcons = preferences.getInt("setIcons", 1);
   count = preferences.getInt("count", 580);
   preferences.end();
+  BMP.setGain(setVolume / 100.0);
   if (setFGC == setBGC) {setFGC = 15; setBGC = 0;}  //do not allow foreground and background colour to be the same
   if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //if probe temp calibration has been saved to flash, use it
         thermistor.setTemperature1(temp1 + 273.15);
@@ -882,8 +883,8 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
   rssi = WiFi.RSSI();
-  //ArduinoOTA.setHostname("mrmeat3");
-  //ArduinoOTA.begin();
+  ArduinoOTA.setHostname("mrmeat3");
+  ArduinoOTA.begin();
   
   Serial.println("Connecting blynk...");
   Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
@@ -970,7 +971,7 @@ void savePrefs() { //save settings routine
 void loop() {
   settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
   if (WiFi.status() == WL_CONNECTED) {
-    //ArduinoOTA.handle();
+    ArduinoOTA.handle();
     Blynk.run();
   }
   doADC();
@@ -1032,7 +1033,12 @@ void loop() {
     
     barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
     if (is2connected) {Blynk.virtualWrite(V4, tempA1f);}
-    Blynk.virtualWrite(V2, tempA0f);
+    if (is1connected) {Blynk.virtualWrite(V2, tempA0f);}
+    if ((etamins < 1000) && (etamins >= 0)) {
+      Blynk.virtualWrite(V6, etamins);
+      Blynk.virtualWrite(V7, temperatureRead());
+    } 
+
     Blynk.virtualWrite(V5, volts2);
   }
 }
