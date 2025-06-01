@@ -347,13 +347,13 @@ void drawTemps() { //main screen
   img.drawFastHLine(0, 150, 128, cmap[setFGC]); // 0,226,240 -> 0,150,128
 
   if (setIcons == 0) {
-    img.setCursor(1, 153); // 1,231
+    img.setCursor(-40, 153); // 1,231
     img.print(WiFi.localIP());
     String v2String = String(rssi) + "dB/" + String(volts2,2) + "v";
     img.setTextDatum(BR_DATUM);
     img.drawString(v2String, 127,159); // 239,239 -> 127,159
   } else if (setIcons == 1) {
-    img.setCursor(1, 152);
+    img.setCursor(-40, 152);
     img.print(WiFi.localIP());
     img.setTextDatum(BR_DATUM);
     img.drawRect(110,153,16,6,cmap[setFGC]); // moved right 3 more pixels
@@ -796,7 +796,7 @@ void setup() {
   setVolume = preferences.getInt("setVolume", 100);
   //setLEDmode = preferences.getInt("setLEDmode", 2);
   setIcons = preferences.getInt("setIcons", 1);
-  count = preferences.getInt("count", 580);
+  count = preferences.getInt("enc_count", 580);
   preferences.end();
   BMP.setGain(setVolume / 100.0);
   if (setFGC == setBGC) {setFGC = 15; setBGC = 0;}  //do not allow foreground and background colour to be the same
@@ -839,7 +839,7 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
      preferences.putInt("setVolume", 100);
      //preferences.putInt("setLEDmode", 2);
      preferences.putInt("setIcons", 1);
-     preferences.putInt("count", 580);
+     preferences.putInt("enc_count", 580);
     preferences.end();
     Serial.println("Prefs reset");
     tft.fillScreen(TFT_ORANGE);
@@ -882,7 +882,7 @@ WiFi.mode(WIFI_STA);  //precharge the wifi
     WiFi.begin(wm.getWiFiSSID(), wm.getWiFiPass());
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
-  rssi = WiFi.RSSI();
+
 
 
 
@@ -957,7 +957,7 @@ void savePrefs() { //save settings routine
   preferences.putInt("setVolume", setVolume); 
   preferences.putInt("setIcons", setIcons);
  // preferences.putInt("setLEDmode", setLEDmode);
-  preferences.putInt("count", count);
+  preferences.putInt("enc_count", enc_count);
   preferences.end();
   
 }
@@ -967,7 +967,7 @@ void loop() {
 
   if ((WiFi.status() == WL_CONNECTED) && (!connected)) {
     connected = true;
-
+      rssi = WiFi.RSSI();
     ArduinoOTA.setHostname("MrMeat3");
     ArduinoOTA.begin();
 
@@ -1002,7 +1002,7 @@ void loop() {
     if (animStep > 4) {animStep = 1;} //reset the animation step
   }
 
-  if (((tempA0f >= settemp) ||  (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0)) {  //If 2nd probe is connected and either temp goes above set temp
+  if (((tempA0f >= settemp) ||  (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0) && (millis() > 8000)) {  //If 2nd probe is connected and either temp goes above set temp
     playSound = true;
   }
   
