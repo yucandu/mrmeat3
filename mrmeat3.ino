@@ -49,6 +49,7 @@ char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 #define rotbutton 5
 #define onewirepin 7
 #define is2connectedthreshold 24000 
+#define ARDUINO_TASK_STACK_SIZE 8192
 
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
@@ -66,7 +67,14 @@ bool isPlaying = false;
 bool bmp1began = false;
 bool bmpdone = true;
 int animpos = 80;
-
+static char settempstring[12];
+static char etastring[12];
+static char v2String[32];
+static char battString[20];
+static char dallasString[32];
+static char temp1string[24], temp2string[24], temp3string[24];
+static char coeffAstring[32], coeffBstring[32], coeffCstring[32];
+static char sampleString[32];
 SteinhartHart thermistor(15062.08,36874.80,82837.54, 348.15, 323.15, 303.15); //these are the default values for a Weber probe
 
 
@@ -232,7 +240,7 @@ Preferences preferences;
   static uint32_t __every__##interval = millis(); \
   if (millis() - __every__##interval >= interval && (__every__##interval = millis()))
 
-  String dallasString,  temp1string,temp2string,temp3string, coeffAstring,  coeffBstring,  coeffCstring;
+
   
 void drawWiFiSignalStrength(int32_t x, int32_t y, int32_t radius) { //chatGPT-generated function to draw a wifi icon with variable rings
     // Get the RSSI value
@@ -324,23 +332,25 @@ void drawTemps() { //main screen
   img.setTextDatum(TL_DATUM);
   img.loadFont(AA_FONT_SMALL);
   img.setCursor(3, 110); // 5,100+24 -> 3,70
-  String settempstring = ">" + String(count / 4) + "<";
+
+  snprintf(settempstring, sizeof(settempstring), ">%d<", count / 4);
+
   img.print("Set Temp:");
   img.setTextDatum(TR_DATUM);
-  img.drawString(settempstring, 127, 110); // 239,100 -> 127,70
+  img.drawString(settempstring, 127, 110);
+
   img.setTextDatum(TL_DATUM);
 
-  img.setCursor(3, 130); // 5,170+24 -> 3,120
+  img.setCursor(3, 130);
   img.print("ETA:");
-  String etastring;
+
   if ((etamins < 1000) && (etamins >= 0)) {
-    etastring = String(etamins) + "mins";
-  }
-  else {
-    etastring = "---mins";
+    snprintf(etastring, sizeof(etastring), "%dmins", etamins);
+  } else {
+    snprintf(etastring, sizeof(etastring), "---mins");
   }
   img.setTextDatum(TR_DATUM);
-  img.drawString(etastring, 127, 130); // 239,170 -> 127,120
+  img.drawString(etastring, 127, 130);
   img.unloadFont();
   img.setTextFont(1);
 
@@ -349,7 +359,8 @@ void drawTemps() { //main screen
   if (setIcons == 0) {
     img.setCursor(-40, 153); // 1,231
     img.print(WiFi.localIP());
-    String v2String = String(rssi) + "dB/" + String(volts2,2) + "v";
+
+    snprintf(v2String, sizeof(v2String), "%ddB/%.2fv", rssi, volts2);
     img.setTextDatum(BR_DATUM);
     img.drawString(v2String, 127,159); // 239,239 -> 127,159
   } else if (setIcons == 1) {
@@ -364,8 +375,7 @@ void drawTemps() { //main screen
     float minsLeft = estimateBatteryTime(volts2);
     int hours = minsLeft / 60;
     int mins = (int)minsLeft % 60;
-    img.setCursor(1, 153);
-    char battString[20];
+
     snprintf(battString, sizeof(battString), "Batt: %dh:%dm", hours, mins);
     img.printf("%s", battString);
     img.setTextDatum(BR_DATUM);
@@ -669,7 +679,6 @@ if (!editMode) {
   // Draw sample string
   img.setTextDatum(TC_DATUM);
   img.setTextColor(cmap[setFGC], cmap[setBGC], true);
-  char sampleString[32];
   snprintf(sampleString, sizeof(sampleString), "%d%s", setFGC, cmapNames[setFGC]);
   img.drawString(sampleString, 64, 140);
 
@@ -691,7 +700,7 @@ void drawCalib() {
     img.println("Please wait for all 3 temperature points to be measured...");
     img.setTextSize(1);
 
-    char dallasString[32];
+    // Remove static declaration since we're using global
     snprintf(dallasString, sizeof(dallasString), "%.2f C, A0: %.2f", onewiretempC, ADSToOhms(volts0));
     img.drawString(dallasString, 0,20);
 
@@ -708,7 +717,7 @@ void drawCalib() {
         therm3 = ADSToOhms(volts0);
     }
 
-    char temp1string[24], temp2string[24], temp3string[24];
+    // Remove static declaration
     snprintf(temp1string, sizeof(temp1string), "75C = %.2f", therm1);
     snprintf(temp2string, sizeof(temp2string), "50C = %.2f", therm2);
     snprintf(temp3string, sizeof(temp3string), "30C = %.2f", therm3);
@@ -726,7 +735,7 @@ void drawCalib() {
             thermistor.setResistance3(therm3);
             thermistor.calcCoefficients();
 
-            char coeffAstring[32], coeffBstring[32], coeffCstring[32];
+
             snprintf(coeffAstring, sizeof(coeffAstring), "A: %.5f", thermistor.getCoeffA());
             snprintf(coeffBstring, sizeof(coeffBstring), "B: %.5f", thermistor.getCoeffB());
             snprintf(coeffCstring, sizeof(coeffCstring), "C: %.5f", thermistor.getCoeffC());
@@ -1017,7 +1026,7 @@ void loop() {
   every(2000) {
      //every 2 seconds update the wifi signal strength variable
     if (calibrationMode) {sensors.requestTemperatures(); onewiretempC = sensors.getTempCByIndex(0);}
-    Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    //Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
   }
 
 
