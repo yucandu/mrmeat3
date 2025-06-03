@@ -36,7 +36,7 @@ bool connected = false;
 bool saved = false;
 const char *ssid = STASSID;
 const char *pass = STAPSK;
-
+unsigned long reconnectTime;
 ESP32I2SAudio audio(2, 3, 0); // BCLK, LRCLK, DOUT (,MCLK)
 
 BackgroundAudioWAV BMP(audio);
@@ -977,6 +977,14 @@ void loop() {
     Blynk.connect();  //Init Blynk
     Serial.println("Blynk connected.");
   }
+
+  if (WiFi.status() != WL_CONNECTED) { //if no wifi, try to reconnect
+    if (millis() - reconnectTime > 30000) {
+          WiFi.disconnect();
+          WiFi.reconnect();
+          reconnectTime = millis();
+    }
+  } 
 
   settemp = count / 4; //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
 
