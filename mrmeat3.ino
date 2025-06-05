@@ -54,6 +54,7 @@ char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
 
+float minsLeft;
 int animStep = 1;
 float onewiretempC, tempF, tempA0, tempA1, tempA0f, tempA1f, barx;
 long adc0, adc1, adc2, adc3, therm1, therm2, therm3; //had to change to long since uint16 wasn't long enough
@@ -127,14 +128,14 @@ void playWavFromFS(const char* filename) {
 float estimateBatteryTime(float voltage) {
   const int numPoints = 22;
   float voltages[numPoints] = {
-    3.9735, 3.9558, 3.9230, 3.8958, 3.8647, 3.8223, 3.7902, 3.7655, 3.7163,
-    3.6793, 3.6387, 3.5762, 3.5502, 3.5107, 3.4837, 3.4598, 3.4235, 3.3932,
-    3.3355, 3.2773, 3.2123, 3.0920
+    4.0862, 4.0399, 3.9740, 3.9136, 3.8576, 3.8075, 3.7614, 3.7199,
+    3.6831, 3.6469, 3.6142, 3.5795, 3.4959, 3.4269, 3.3703, 3.3360,
+    3.3160, 3.2935, 3.2665, 3.2400, 3.2240, 3.2140
   };
   float times[numPoints] = {
-    831, 791, 751, 701, 671, 631, 591, 561, 501,
-    471, 431, 391, 351, 311, 261, 241, 191, 151,
-    111,  71,  31,   0
+    1380, 1320, 1260, 1200, 1140, 1080, 1020, 960,
+     900, 840, 780, 660, 360, 240,  97,  34,
+      24,  18,  10,   3,   1,   0
   };
 
   if (voltage >= voltages[0]) return times[0];
@@ -372,10 +373,10 @@ void drawTemps() { //main screen
     img.drawFastVLine(126,155,3,cmap[setFGC]);
     if (WiFi.status() == WL_CONNECTED) {drawWiFiSignalStrength(98,157,6);} // 200,237,9 -> 92,157,6
   } else if (setIcons == 2) {
-    float minsLeft = estimateBatteryTime(volts2);
+    
     int hours = minsLeft / 60;
     int mins = (int)minsLeft % 60;
-
+    img.setCursor(0, 152);
     snprintf(battString, sizeof(battString), "Batt: %dh:%dm", hours, mins);
     img.printf("%s", battString);
     img.setTextDatum(BR_DATUM);
@@ -1037,7 +1038,8 @@ void loop() {
 
 
   int ETA_INTERVAL = 15;
-  every (15000) {  //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
+  every (15000) {  
+    minsLeft = estimateBatteryTime(volts2);//manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
   if (!calibrationMode) { 
       tempdiff = tempA0f - oldtemp;
       if (is2connected) {  //If 2nd probe is connected, calculate whichever ETA is sooner in seconds
