@@ -413,7 +413,7 @@ void drawTemps() { //main screen
   }
 
   img.fillRect(animX + 3, animY - 3, 3, 3, cmap[setFGC]);
-
+  img.drawRect(0,0,240,320,TFT_WHITE); // moved right 3 more pixels
   img.pushSprite(0, 0);
 }
 
@@ -820,7 +820,7 @@ void setup() {
         thermistor.calcCoefficients();
   }
   img.setColorDepth(8);  //WE DONT HAVE ENOUGH RAM LEFT FOR 16 BIT AND JOHNNY CASH, MUST USE 8 BIT COLOUR!
-  img.createSprite(128, 160);
+  img.createSprite(240, 320);
   img.fillSprite(TFT_BLUE);
 
   oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
@@ -1069,5 +1069,7 @@ void loop() {
     } 
 
     Blynk.virtualWrite(V5, volts2);
+    Blynk.virtualWrite(V8, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    
   }
 }
