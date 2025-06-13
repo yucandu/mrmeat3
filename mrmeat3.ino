@@ -15,14 +15,14 @@
 #include <SteinhartHart.h>
 #include <ESP32I2SAudio.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
+
 #include <BackgroundAudio.h>
 #include <LittleFS.h>
 //#include <JohnnyCash.h>
 //#include <eatit.h>
 #define STASSID "mikesnet"
 #define STAPSK "springchicken"
-#include <ADS1115_WE.h>
+#include <Adafruit_ADS1X15.h>
 #include <Wire.h>
 //#include <BackgroundAudioSpeech.h>
 //#include <libespeak-ng/voice/en.h>
@@ -32,7 +32,7 @@
 #define AA_FONT_SMALL NotoSansBold36
 #define AA_FONT_LARGE SegoeUI_Bold_48
 //String temp1string,temp2string,temp3string;
-ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
+Adafruit_ADS1115 adc; 
 bool connected = false;
 bool saved = false;
 const char* ssid = STASSID;
@@ -50,7 +50,7 @@ char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 #define rotRpin 20
 #define rotbutton 5
 #define onewirepin 7
-#define is2connectedthreshold 24000
+#define is2connectedthreshold 23000
 #define ARDUINO_TASK_STACK_SIZE 8192
 
 OneWire oneWire(onewirepin);
@@ -71,14 +71,14 @@ bool isPlaying = false;
 bool bmp1began = false;
 bool bmpdone = true;
 int animpos = 80;
-static char settempstring[64];
-static char etastring[64];
-static char v2String[64];
-static char battString[64];
-static char dallasString[64];
-static char temp1string[64], temp2string[64], temp3string[64];
-static char coeffAstring[64], coeffBstring[64], coeffCstring[64];
-static char sampleString[64];
+static char settempstring[192];
+static char etastring[192];
+static char v2String[192];
+static char battString[192];
+static char dallasString[192];
+static char temp1string[192], temp2string[192], temp3string[192];
+static char coeffAstring[192], coeffBstring[192], coeffCstring[192];
+static char sampleString[192];
 SteinhartHart thermistor(15062.08, 36874.80, 82837.54, 348.15, 323.15, 303.15);  //these are the default values for a Weber probe
 
 
@@ -95,7 +95,7 @@ volatile int enc_count = 0;
 
 File f;
 const size_t bufsize = 256;
-uint8_t buf[bufsize];
+ uint8_t buf[bufsize];
 
 void waitForButtonsReleased() {
   while (!digitalRead(rotbutton)) {
@@ -144,12 +144,13 @@ void continueAudioPlayback() {
 
 float estimateBatteryTime(float voltage) {
   const int numPoints = 22;
-  float voltages[numPoints] = {
+  // Move these to static to avoid stack allocation on each call
+  static const float voltages[numPoints] = {
     4.0862, 4.0399, 3.9740, 3.9136, 3.8576, 3.8075, 3.7614, 3.7199,
     3.6831, 3.6469, 3.6142, 3.5795, 3.4959, 3.4269, 3.3703, 3.3360,
     3.3160, 3.2935, 3.2665, 3.2400, 3.2240, 3.2140
   };
-  float times[numPoints] = {
+  static const float times[numPoints] = {
     1380, 1320, 1260, 1200, 1140, 1080, 1020, 960,
     900, 840, 780, 660, 360, 240, 97, 34,
     24, 18, 10, 3, 1, 0
@@ -298,8 +299,9 @@ void drawWiFiSignalStrength(int32_t x, int32_t y, int32_t radius) {  //chatGPT-g
   }
 }
 
-double ADSToOhms(float volts) {  //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
-  return (volts * 22000) / (3.3 - volts);
+double ADSToOhms(int16_t ADSreading) { //convert raw ADS reading to a measured resistance in ohms, knowing R1 is 22000 ohms
+      float voltsX = adc.computeVolts(ADSreading);
+      return (voltsX * 22000) / (3.3 - voltsX);
 }
 
 
@@ -334,8 +336,9 @@ void drawTemps() {  //main screen
   } else if (!is1connected && is2connected) {
     img.drawFloat(tempA1f, 1, 120, 42);  // 115,5 -> 56,3
   } else {
-    img.setTextFont(6);                 //use a smaller font
+    img.loadFont(AA_FONT_LARGE);               //use a smaller font
     img.drawString("N/C", 120, 22, 1);  // 115,5 -> 56,3
+    img.unloadFont();
   }
   img.drawFastHLine(0, 175, 240, cmap[setFGC]);  // 0,85,240 -> 0,56,128
   img.unloadFont();
@@ -438,66 +441,44 @@ void pinChangeISR() {
   abOld = abNew;  // Save new state
 }
 
-float readChannel(ADS1115_MUX channel) {
-  float voltage = 0.0;
-  adc.setCompareChannels(channel);
-  adc.startSingleMeasurement();
-  while (adc.isBusy()) { delay(0); }
-  voltage = adc.getRawResult();  // alternative: getResult_mV for Millivolt
-  return voltage;
-}
-
-float readChannelV(ADS1115_MUX channel) {
-  float voltage = 0.0;
-  adc.setCompareChannels(channel);
-  adc.startSingleMeasurement();
-  while (adc.isBusy()) { delay(0); }
-  voltage = adc.getResult_V();  // alternative: getResult_mV for Millivolt
-  return voltage;
-}
-
 void doADC() {  //take measurements from the ADC without blocking
-  if (!adc.isBusy()) {
+  if (adc.conversionComplete()) {
     if (channel == 0) {
-      volts0 = adc.getResult_V();
-      adc0 = adc.getRawResult();  // alternative: getResult_mV for Millivolt
-      tempA0 = thermistor.resistanceToTemperature(ADSToOhms(volts0));
-      if (setUnits == 0) {
-        tempA0f = tempA0 - 273.15;
-      } else if (setUnits == 1) {
-        tempA0f = ((tempA0 - 273.15) * 1.8) + 32;
-      } else if (setUnits == 2) {
-        tempA0f = tempA0;
+      adc0 = adc.getLastConversionResults();
+      if (setUnits == 0) {tempA0f = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15;}
+      else if (setUnits == 1) {
+        tempA0 = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15;
+        tempA0f = (tempA0 * 1.8) + 32;
       }
-      adc.setCompareChannels(ADS1115_COMP_1_GND);
-      adc.startSingleMeasurement();
+      else if (setUnits == 2) {tempA0f = thermistor.resistanceToTemperature(ADSToOhms(adc0));}
+
+      adc.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_1, false);
       channel = 1;
       return;
     }
     if (channel == 1) {
-      volts1 = adc.getResult_V();
-      adc1 = adc.getRawResult();  // alternative: getResult_mV for Millivolt
-      tempA1 = thermistor.resistanceToTemperature(ADSToOhms(volts1));
-      if (setUnits == 0) {
-        tempA1f = tempA1 - 273.15;
-      } else if (setUnits == 1) {
-        tempA1f = ((tempA1 - 273.15) * 1.8) + 32;
-      } else if (setUnits == 2) {
-        tempA1f = tempA1;
+      adc1 = adc.getLastConversionResults();
+      if (setUnits == 0) {tempA1f = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;}
+      else if (setUnits == 1) {
+        tempA1 = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;
+        tempA1f = (tempA1 * 1.8) + 32;
       }
-      adc.setCompareChannels(ADS1115_COMP_2_GND);
-      adc.startSingleMeasurement();
+      else if (setUnits == 2) {tempA1f = thermistor.resistanceToTemperature(ADSToOhms(adc1));}
+      adc.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_2, false);
       channel = 2;
       return;
     }
     if (channel == 2) {  //channel for measuring battery voltage
-      volts2 = adc.getResult_V() * 2.0;
-      adc.setCompareChannels(ADS1115_COMP_0_GND);
-      adc.startSingleMeasurement();
+      adc2 = adc.getLastConversionResults();
+      adc.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, false);
       channel = 0;
       return;
     }
   }
+  
+
+  
+
 }
 
 
@@ -506,16 +487,22 @@ double mapf(float x, float in_min, float in_max, float out_min, float out_max)  
 {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-
 void forceADC() {  //force an ADC measurement and block the CPU to do it
-  adc0 = readChannelV(ADS1115_COMP_0_GND);
-  adc1 = readChannelV(ADS1115_COMP_1_GND);
-  volts2 = readChannelV(ADS1115_COMP_2_GND) * 2.0;  //battery voltage measurement
-  tempA0 = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15;
-  tempA0f = (tempA0 * 1.8) + 32;
-  tempA1 = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;
-  tempA1f = (tempA1 * 1.8) + 32;
-  barx = mapf(volts2, 3.2, 4.0, 0, 20);
+  adc0 = adc.readADC_SingleEnded(0);
+  adc1 = adc.readADC_SingleEnded(1);
+  adc2 = adc.readADC_SingleEnded(2);
+  volts2 = adc.computeVolts(adc2) * 2.0;  //battery voltage measurement
+  //volts2 = maxlipo.cellVoltage();
+  //adc0 = adc.getLastConversionResults();
+  if (setUnits == 0) {tempA0f = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15; tempA1f = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;}
+  else if (setUnits == 1) {
+    tempA0 = thermistor.resistanceToTemperature(ADSToOhms(adc0)) - 273.15;
+    tempA0f = (tempA0 * 1.8) + 32;
+    tempA1 = thermistor.resistanceToTemperature(ADSToOhms(adc1)) - 273.15;
+    tempA1f = (tempA1 * 1.8) + 32;
+  }
+  else if (setUnits == 2) {tempA0f = thermistor.resistanceToTemperature(ADSToOhms(adc0)); tempA1f = thermistor.resistanceToTemperature(ADSToOhms(adc1));}
+  barx = mapf (volts2, 3.2, 4.0, 0, 20);
 }
 
 uint8_t findDevices(int pin) {
@@ -851,7 +838,7 @@ void drawCalib() {
   img.pushSprite(0, 0);
 }
 
-SET_LOOP_TASK_STACK_SIZE(32 * 1024);
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 void setup() {
 
@@ -874,14 +861,9 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextSize(2);
   Wire.begin();
-  if (!adc.init()) {
-    Serial.println("ADS1115 not connected!");
-  }
-  UBaseType_t stackSize = uxTaskGetStackHighWaterMark(NULL);
-  Serial.printf("Available stack: %d bytes\n", stackSize * sizeof(StackType_t));
-  Serial.printf("Arduino Stack was set to %d bytes", getArduinoLoopTaskStackSize());
-  adc.setVoltageRange_mV(ADS1115_RANGE_4096);  // Set voltage range to 0-4.096V
-  adc.setConvRate(ADS1115_8_SPS);
+  adc.begin();  //fire up the ADC
+  adc.setGain(GAIN_ONE);  //1x gain setting is perfect
+  adc.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, false);
   Serial.println("Loading prefs");
   preferences.begin("my-app", false);  //read preferences from flash, with default values if none are found
   temp1 = preferences.getInt("temp1", 0);
@@ -1014,6 +996,9 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(rotLpin), pinChangeISR, CHANGE);  // Set up pin-change interrupts
     attachInterrupt(digitalPinToInterrupt(rotRpin), pinChangeISR, CHANGE);
   }
+    Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 
@@ -1085,8 +1070,7 @@ void loop() {
     Blynk.connect();  //Init Blynk
     Serial.println("Blynk connected.");
   }
-
-  if (WiFi.status() != WL_CONNECTED) {  //if no wifi, try to reconnect
+  else if (WiFi.status() != WL_CONNECTED) {  //if no wifi, try to reconnect
     if (millis() - reconnectTime > 30000) {
       WiFi.disconnect();
       WiFi.reconnect();
@@ -1094,17 +1078,19 @@ void loop() {
     }
   }
 
-  settemp = count / 4;  //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
+    //set the set temperature to the count divided by 4, so we can set it with the rotary encoder
 
-  if ((WiFi.status() == WL_CONNECTED) && (connected)) {
+  if ((connected)) {
     ArduinoOTA.handle();
     Blynk.run();
   }
-  doADC();
+  
   continueAudioPlayback();
   doSound();  //play the sound if needed
   continueAudioPlayback();
-  every(50) {  //every 5 milliseconds, so we don't waste battery power
+  every(10) {  //every 5 milliseconds, so we don't waste battery power
+    settemp = count / 4;
+    doADC();
     if (adc0 < is2connectedthreshold) {
       is1connected = true;
     } else {
@@ -1124,10 +1110,6 @@ void loop() {
     } else {
       drawCalib();
     }  //else draw the calibration screen
-  }
-
-  continueAudioPlayback();
-
   bool tempAbove = ((tempA0f >= settemp) || (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0) && (millis() > 8000);
 
   if (tempAbove) {
@@ -1141,6 +1123,11 @@ void loop() {
     tempAlarmActive = false;
     tempAlarmStart = 0;
   }
+  }
+
+  continueAudioPlayback();
+
+
 
 
   every(2000) {
@@ -1149,9 +1136,9 @@ void loop() {
       sensors.requestTemperatures();
       onewiretempC = sensors.getTempCByIndex(0);
     }
-    Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
-    Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
-    Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    //Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    //Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    //Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
 
 
@@ -1159,8 +1146,9 @@ void loop() {
 
 
 
-  int ETA_INTERVAL = 15;
+  
   every(15000) {
+    int ETA_INTERVAL = 15;
     //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
     if (!calibrationMode) {
       minsLeft = estimateBatteryTime(volts2);
@@ -1181,19 +1169,20 @@ void loop() {
   }
 
   every(30000) {  //every 10 seconds
-
-    barx = mapf(volts2, 3.2, 4.0, 0, 20);  //update the battery icon length
+    volts2 = adc.computeVolts(adc2) * 2.0; //update the battery voltage
+    //volts2 = maxlipo.cellVoltage();
+    barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
     if (is2connected) { Blynk.virtualWrite(V4, tempA1f); }
     if (is1connected) { Blynk.virtualWrite(V2, tempA0f); }
     if ((etamins < 1000) && (etamins >= 0)) {
       Blynk.virtualWrite(V6, etamins);
-      Blynk.virtualWrite(V7, temperatureRead());
+      
     }
-
+    Blynk.virtualWrite(V7, temperatureRead());
     Blynk.virtualWrite(V5, volts2);
-    Blynk.virtualWrite(V8, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+    //Blynk.virtualWrite(V8, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+   // UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
 
-    Blynk.virtualWrite(V9, stackHighWaterMark * sizeof(StackType_t));
+    //Blynk.virtualWrite(V9, stackHighWaterMark * sizeof(StackType_t));
   }
 }
