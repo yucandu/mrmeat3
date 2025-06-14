@@ -1,7 +1,7 @@
 #include <WiFiManager.h>
 #include <TFT_eSPI.h>
-#include "Fonts/SegoeUI_Bold_48.h"
-#include "Fonts/NotoSansBold36.h"
+//#include "Fonts/SegoeUI_Bold_48.h"
+#include "Fonts/Roboto_Condensed_32.h"
 #include <ESP_I2S.h>
 // Graphics and font library for ST7735 driver chip
 #include <OneWire.h>
@@ -29,11 +29,12 @@
 
 
 #define I2C_ADDRESS 0x48
-#define AA_FONT_SMALL NotoSansBold36
-#define AA_FONT_LARGE SegoeUI_Bold_48
+
+#define AA_FONT_LARGE &Roboto_Condensed_32
 //String temp1string,temp2string,temp3string;
 Adafruit_ADS1115 adc; 
 bool connected = false;
+bool etaChanged = false;
 bool saved = false;
 const char* ssid = STASSID;
 const char* pass = STAPSK;
@@ -84,6 +85,7 @@ SteinhartHart thermistor(15062.08, 36874.80, 82837.54, 348.15, 323.15, 303.15); 
 
 TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 TFT_eSprite img = TFT_eSprite(&tft);
+TFT_eSprite tempSprite = TFT_eSprite(&tft);
 static byte abOld;           // Initialize state
 volatile int count = 580;    // current rotary count
 volatile int downcount = 0;  // current rotary count
@@ -336,12 +338,12 @@ void drawTemps() {  //main screen
   } else if (!is1connected && is2connected) {
     img.drawFloat(tempA1f, 1, 120, 42);  // 115,5 -> 56,3
   } else {
-    img.loadFont(AA_FONT_LARGE);               //use a smaller font
+    img.setFreeFont(AA_FONT_LARGE);            //use a smaller font
     img.drawString("N/C", 120, 22, 1);  // 115,5 -> 56,3
-    img.unloadFont();
+    //img.unloadFont();
   }
   img.drawFastHLine(0, 175, 240, cmap[setFGC]);  // 0,85,240 -> 0,56,128
-  img.unloadFont();
+  //img.unloadFont();
   img.setTextFont(1);
   img.setTextDatum(TR_DATUM);
 
@@ -359,7 +361,7 @@ void drawTemps() {  //main screen
 
   img.setTextDatum(TL_DATUM);
   //img.setFreeFont(AA_FONT_LARGE);
-  img.loadFont(AA_FONT_LARGE);
+  img.setFreeFont(AA_FONT_LARGE);
   img.setCursor(3, 175);  // 5,100+24 -> 3,70
 
   snprintf(settempstring, sizeof(settempstring), ">%d<", count / 4);
@@ -381,7 +383,7 @@ void drawTemps() {  //main screen
   }
   img.setTextDatum(BC_DATUM);
   img.drawString(etastring, 120, 300);
-  img.unloadFont();
+  //img.unloadFont();
   img.setTextFont(1);
 
   img.drawFastHLine(0, 320 - 14, 240, cmap[setFGC]);  // 0,226,240 -> 0,150,128
@@ -586,6 +588,7 @@ void drawSettings() {         //if we're in settings mode
         b1pressed = false;
         editMode = false;
         waitForButtonsReleased();
+        tft.fillScreen(cmap[setBGC]);
       }
 
       b1pressed = false;
@@ -859,6 +862,7 @@ void setup() {
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
+  //tft.setColorDepth(8);  //set colour depth to 8 bit
   tft.setTextSize(2);
   Wire.begin();
   adc.begin();  //fire up the ADC
@@ -902,6 +906,7 @@ void setup() {
   img.setTextSize(2);
   oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
   oldtemp2 = tempA1f;
+  tft.fillScreen(cmap[setBGC]);
   forceADC();
   drawTemps();
   Serial.println("Starting wifi");
@@ -996,9 +1001,21 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(rotLpin), pinChangeISR, CHANGE);  // Set up pin-change interrupts
     attachInterrupt(digitalPinToInterrupt(rotRpin), pinChangeISR, CHANGE);
   }
+    tft.fillScreen(TFT_CYAN);
+    tft.setCursor(0, 0);
+    tft.setTextFont(1);
+    tft.println("Debug Mode!");
+    tft.println("To begin, press any button.");
+    while (digitalRead(rotbutton)) { delay(1); }  //wait until a button is pressed
+
+    waitForButtonsReleased();  //wait for button to be released
+  
+
+    Serial.println("Blynk connected.");
     Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
     Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
     Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    tft.fillScreen(cmap[setBGC]);
 }
 
 
@@ -1068,7 +1085,6 @@ void loop() {
     Serial.println("Connecting blynk...");
     Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
     Blynk.connect();  //Init Blynk
-    Serial.println("Blynk connected.");
   }
   else if (WiFi.status() != WL_CONNECTED) {  //if no wifi, try to reconnect
     if (millis() - reconnectTime > 30000) {
@@ -1088,7 +1104,7 @@ void loop() {
   continueAudioPlayback();
   doSound();  //play the sound if needed
   continueAudioPlayback();
-  every(10) {  //every 5 milliseconds, so we don't waste battery power
+  every(20) {  //every 5 milliseconds, so we don't waste battery power
     settemp = count / 4;
     doADC();
     if (adc0 < is2connectedthreshold) {
@@ -1110,19 +1126,19 @@ void loop() {
     } else {
       drawCalib();
     }  //else draw the calibration screen
-  bool tempAbove = ((tempA0f >= settemp) || (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0) && (millis() > 8000);
+    bool tempAbove = ((tempA0f >= settemp) || (tempA1f >= settemp)) && (!calibrationMode) && (is1connected || is2connected) && (setVolume > 0) && (millis() > 8000);
 
-  if (tempAbove) {
-    if (!tempAlarmActive) {
-      tempAlarmActive = true;
-      tempAlarmStart = millis();
-    } else if (millis() - tempAlarmStart > 500) {
-      playSound = true;
+    if (tempAbove) {
+      if (!tempAlarmActive) {
+        tempAlarmActive = true;
+        tempAlarmStart = millis();
+      } else if (millis() - tempAlarmStart > 500) {
+        playSound = true;
+      }
+    } else {
+      tempAlarmActive = false;
+      tempAlarmStart = 0;
     }
-  } else {
-    tempAlarmActive = false;
-    tempAlarmStart = 0;
-  }
   }
 
   continueAudioPlayback();
@@ -1163,7 +1179,10 @@ void loop() {
       {
         eta = (((settemp - tempA0f) / tempdiff) * ETA_INTERVAL);
       }
+      if (etamins != eta / 60) {
       etamins = eta / 60;  //cast it to int and divide it by 60 to get minutes with no remainder, ignore seconds because of inaccuracy
+      etaChanged = true;
+      }
       oldtemp = tempA0f;
     }
   }
