@@ -1,7 +1,11 @@
 #include <WiFiManager.h>
-#include <TFT_eSPI.h>
+//#include <TFT_eSPI.h>
+#include <LovyanGFX.hpp>
 //#include "Fonts/SegoeUI_Bold_48.h"
-#include "Fonts/Roboto_Condensed_32.h"
+//#include <Fonts/Font72rle.h>
+#include "Roboto_Condensed_32.h"
+//#include <lgfx_fonts.hpp>
+
 #include <ESP_I2S.h>
 // Graphics and font library for ST7735 driver chip
 #include <OneWire.h>
@@ -10,7 +14,6 @@
 #include <BlynkSimpleEsp32.h>
 #include <ArduinoOTA.h>
 
-#include <BlynkSimpleEsp32.h>
 #include <SPI.h>
 #include <SteinhartHart.h>
 #include <ESP32I2SAudio.h>
@@ -27,7 +30,8 @@
 //#include <BackgroundAudioSpeech.h>
 //#include <libespeak-ng/voice/en.h>
 
-
+volatile bool rotLeft = false;   // Flag for left rotation
+volatile bool rotRight = false;  // Flag for right rotation
 #define I2C_ADDRESS 0x48
 
 #define AA_FONT_LARGE &Roboto_Condensed_32
@@ -82,10 +86,58 @@ static char coeffAstring[192], coeffBstring[192], coeffCstring[192];
 static char sampleString[192];
 SteinhartHart thermistor(15062.08, 36874.80, 82837.54, 348.15, 323.15, 303.15);  //these are the default values for a Weber probe
 
+class LGFX : public lgfx::LGFX_Device
+{
+  lgfx::Panel_ST7789 _panel_instance;
+  lgfx::Bus_SPI _bus_instance;
 
-TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
-TFT_eSprite img = TFT_eSprite(&tft);
-TFT_eSprite tempSprite = TFT_eSprite(&tft);
+public:
+  LGFX(void)
+  {
+    {
+      auto cfg = _bus_instance.config();
+      cfg.spi_host = SPI2_HOST;
+      cfg.spi_mode = 3;
+      cfg.freq_write = 27000000;    // Try higher frequency
+      cfg.freq_read = 20000000;
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+      cfg.pin_sclk = 4;
+      cfg.pin_mosi = 6;
+      cfg.pin_miso = -1;
+      cfg.pin_dc = 1;
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+
+    {
+      auto cfg = _panel_instance.config();
+      cfg.pin_cs = 7;
+      cfg.pin_rst = 10;
+      cfg.pin_busy = -1;
+      cfg.panel_width = 240;
+      cfg.panel_height = 320;
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+      cfg.readable = true;
+      cfg.invert = true;       // Most ST7789 need this
+      cfg.rgb_order = false; 
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = true;
+      _panel_instance.config(cfg);
+    }
+
+    setPanel(&_panel_instance);
+  }
+};
+
+
+// Create an instance of the prepared class.
+static LGFX tft;
+static LGFX_Sprite  img(&tft);
+
 static byte abOld;           // Initialize state
 volatile int count = 580;    // current rotary count
 volatile int downcount = 0;  // current rotary count
@@ -104,6 +156,8 @@ void waitForButtonsReleased() {
     delay(10);  // debounce delay
   }
 }
+
+
 
 File audioFile;
 bool isAudioPlaying = false;
@@ -291,13 +345,13 @@ void drawWiFiSignalStrength(int32_t x, int32_t y, int32_t radius) {  //chatGPT-g
 
   // Draw arcs based on the determined number of arcs and color
   if (numArcs >= 1) {
-    img.drawArc(x, y, radius / 3, radius / 3 - 1, 135, 225, color, cmap[setBGC]);  // Arc 1
+    img.drawArc(x, y, radius / 3, radius / 3 - 1, 135, 225, color);  // Arc 1
   }
   if (numArcs >= 2) {
-    img.drawArc(x, y, 2 * radius / 3, 2 * radius / 3 - 1, 135, 225, color, cmap[setBGC]);  // Arc 2
+    img.drawArc(x, y, 2 * radius / 3, 2 * radius / 3 - 1, 135, 225, color);  // Arc 2
   }
   if (numArcs >= 3) {
-    img.drawArc(x, y, radius, radius - 1, 135, 225, color, cmap[setBGC]);  // Arc 3
+    img.drawArc(x, y, radius, radius - 1, 135, 225, color);  // Arc 3
   }
 }
 
@@ -308,14 +362,14 @@ double ADSToOhms(int16_t ADSreading) { //convert raw ADS reading to a measured r
 
 
 void drawTemps() {  //main screen
-
+Serial.println("reading button");
   if (!digitalRead(rotbutton)) {  //if both are pressed at the same time
     settingspage = true;          //go to settings page
     enc_count = count;
     waitForButtonsReleased();
   }
 
-
+Serial.println("filling sprite");
   img.fillSprite(cmap[setBGC]);
   img.setCursor(0, 0);
   img.setTextSize(1);
@@ -325,7 +379,10 @@ void drawTemps() {  //main screen
   // Proportional scaling factors
   // 240x240 -> 128x160: x = x * 0.533, y = y * 0.666
   // Example: 240 -> 128, 240 -> 160
-  img.setTextFont(8);  //smaller font for 128x160
+  Serial.println("setting font 8");
+  img.setFont(&fonts::Font8);
+//smaller font for 128x160
+  Serial.println("checking connections");
   if (is2connected && is1connected) {
 
     float a0ex = 164.4;
@@ -338,13 +395,15 @@ void drawTemps() {  //main screen
   } else if (!is1connected && is2connected) {
     img.drawFloat(tempA1f, 1, 120, 42);  // 115,5 -> 56,3
   } else {
-    img.setFreeFont(AA_FONT_LARGE);            //use a smaller font
+    img.setFont(&fonts::Font8);         //use a smaller font
     img.drawString("N/C", 120, 22, 1);  // 115,5 -> 56,3
     //img.unloadFont();
   }
+  Serial.println("drawing lines");
   img.drawFastHLine(0, 175, 240, cmap[setFGC]);  // 0,85,240 -> 0,56,128
   //img.unloadFont();
-  img.setTextFont(1);
+  Serial.println("setting font 1");
+  img.setFont(&fonts::Font0);
   img.setTextDatum(TR_DATUM);
 
   // Degrees/unit indicator
@@ -360,14 +419,16 @@ void drawTemps() {  //main screen
 
 
   img.setTextDatum(TL_DATUM);
-  //img.setFreeFont(AA_FONT_LARGE);
-  img.setFreeFont(AA_FONT_LARGE);
+  img.setFont(AA_FONT_LARGE);
+  Serial.println("setting freefont 1");
+  //img.setFont(&fonts::AA_FONT_LARGE);
   img.setCursor(3, 175);  // 5,100+24 -> 3,70
-
+  Serial.println("snprintf settempstring");
   snprintf(settempstring, sizeof(settempstring), ">%d<", count / 4);
 
   //img.print("Set:");
   img.setTextDatum(TC_DATUM);
+  Serial.println("drawing settempstring");
   img.drawString(settempstring, 120, 190);
 
   img.setTextDatum(TC_DATUM);
@@ -375,21 +436,22 @@ void drawTemps() {  //main screen
   //img.loadFont(AA_FONT_SMALL);
   img.setCursor(120, 195 + 24);
   //img.drawString("ETA:", 120, 219, 1);
-
+  Serial.println("calculating ETA");
   if ((etamins < 1000) && (etamins >= 0)) {
     snprintf(etastring, sizeof(etastring), "%dmins", etamins);
   } else {
     snprintf(etastring, sizeof(etastring), "---mins");
   }
   img.setTextDatum(BC_DATUM);
+  Serial.println("drawing etastring");
   img.drawString(etastring, 120, 300);
   //img.unloadFont();
-  img.setTextFont(1);
+  img.setFont(&fonts::Font0);
 
   img.drawFastHLine(0, 320 - 14, 240, cmap[setFGC]);  // 0,226,240 -> 0,150,128
-
+  Serial.println("drawing bottom row");
   if (setIcons == 0) {
-    img.setCursor(0, 320 - 9);  // 1,231
+    img.setCursor(0, 320);  // 1,231
     img.print(WiFi.localIP());
 
     snprintf(v2String, sizeof(v2String), "%ddB/%.2fv", rssi, volts2);
@@ -418,13 +480,14 @@ void drawTemps() {  //main screen
   }
 
   img.fillRect(animpos, 312, 4, 4, cmap[setFGC]);  //draw our little status indicator
-  animpos += 2;                                    //make it fly
+  animpos++;                                    //make it fly
   if (animpos > 160) { animpos = 130; }            //make it wrap around
+  Serial.println("pushing sprite");
   img.pushSprite(0, 0);
+  Serial.println("drawTemps done");
 }
 
-volatile bool rotLeft = false;   // Flag for left rotation
-volatile bool rotRight = false;  // Flag for right rotation
+
 
 
 void pinChangeISR() {
@@ -554,7 +617,7 @@ void drawSettings() {         //if we're in settings mode
   img.setTextColor(TFT_WHITE);
   img.setTextDatum(TL_DATUM);
 
-  img.setTextFont(1);
+  img.setFont(&fonts::Font0);
 
 
   if (!digitalRead(rotbutton)) {
@@ -588,7 +651,7 @@ void drawSettings() {         //if we're in settings mode
         b1pressed = false;
         editMode = false;
         waitForButtonsReleased();
-        tft.fillScreen(cmap[setBGC]);
+        //tft.fillScreen(cmap[setBGC]);
       }
 
       b1pressed = false;
@@ -671,7 +734,7 @@ void drawSettings() {         //if we're in settings mode
   // Draw menu items
   for (int i = 0; i < 8; i++) {
     if (setSelection == i && !editMode) {
-      img.setTextColor(TFT_BLACK, TFT_WHITE, true);
+      img.setTextColor(TFT_BLACK, TFT_WHITE);
     } else {
       img.setTextColor(TFT_WHITE);
     }
@@ -692,7 +755,7 @@ void drawSettings() {         //if we're in settings mode
   for (int i = 0; i < 8; i++) {
     int y = i * 16;
     bool highlight = (editMode && editSelection == i);
-    if (highlight) img.setTextColor(TFT_BLACK, TFT_WHITE, true);
+    if (highlight) img.setTextColor(TFT_BLACK, TFT_WHITE);
     else img.setTextColor(TFT_WHITE);
 
     switch (i) {
@@ -734,7 +797,7 @@ void drawSettings() {         //if we're in settings mode
 
   // Draw sample string
   img.setTextDatum(TC_DATUM);
-  img.setTextColor(cmap[setFGC], cmap[setBGC], true);
+  img.setTextColor(cmap[setFGC], cmap[setBGC]);
   snprintf(sampleString, sizeof(sampleString), "%d%s", setFGC, cmapNames[setFGC]);
   img.drawString(sampleString, 120, 200);
 
@@ -752,8 +815,8 @@ void drawCalib() {
     img.fillSprite(TFT_YELLOW);
   }
   img.setTextSize(2);
-  img.setTextColor(TFT_WHITE, TFT_BLACK, true);
-  img.setTextFont(1);
+  img.setTextColor(TFT_WHITE, TFT_BLACK);
+  img.setFont(&fonts::Font0);
   img.setTextDatum(TL_DATUM);
   img.setCursor(0, 0);
   img.println("Calibrating!");
@@ -855,13 +918,22 @@ void setup() {
   pinMode(rotLpin, INPUT_PULLUP);
   pinMode(rotRpin, INPUT_PULLUP);
   pinMode(rotbutton, INPUT_PULLUP);
-
+  pinMode( GPIO_NUM_10, OUTPUT );
+  //digitalWrite( GPIO_NUM_10, 0 ); // also try with 1
+  delay(100);
   abOld = count = old_count = 0;
   Serial.begin(115200);
+  delay(1000);  //wait for serial to start
+  Serial.println("Starting up...");
   Serial.println("Hello!");
-  tft.init();
+  if (tft.init()) {
+    Serial.println("LCD init OK");
+  } else {
+    Serial.println("LCD init FAILED");
+  }
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
+  //test the display
   //tft.setColorDepth(8);  //set colour depth to 8 bit
   tft.setTextSize(2);
   Wire.begin();
@@ -885,11 +957,13 @@ void setup() {
   setIcons = preferences.getInt("setIcons", 1);
   count = preferences.getInt("enc_count", 580);
   preferences.end();
+  Serial.println("done Loading prefs");
   BMP.setGain(setVolume / 100.0);
   if (setFGC == setBGC) {
     setFGC = 15;
     setBGC = 0;
-  }                                                 //do not allow foreground and background colour to be the same
+  }                                      
+  Serial.println("doing therm calcs");           //do not allow foreground and background colour to be the same
   if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //if probe temp calibration has been saved to flash, use it
     thermistor.setTemperature1(temp1 + 273.15);
     thermistor.setTemperature2(temp2 + 273.15);
@@ -899,15 +973,21 @@ void setup() {
     thermistor.setResistance3(therm3);
     thermistor.calcCoefficients();
   }
+  Serial.println("creating sprite");
   img.setColorDepth(8);  //WE DONT HAVE ENOUGH RAM LEFT FOR 16 BIT AND JOHNNY CASH, MUST USE 8 BIT COLOUR!
-  img.createSprite(240, 320);
+  if (!img.createSprite(240, 320))  {
+   Serial.println("Failed to create sprite!");
+  }
   img.fillSprite(TFT_BLUE);
   img.setTextWrap(true);  // Wrap on width
   img.setTextSize(2);
   oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
   oldtemp2 = tempA1f;
-  tft.fillScreen(cmap[setBGC]);
+  Serial.println("filling screen");
+  //tft.fillScreen(cmap[setBGC]);
+  Serial.println("forcing adc");
   forceADC();
+  Serial.println("drawing temps");
   drawTemps();
   Serial.println("Starting wifi");
   WiFi.mode(WIFI_STA);  //precharge the wifi
@@ -936,7 +1016,7 @@ void setup() {
     Serial.println("Prefs reset");
     tft.fillScreen(TFT_ORANGE);
     tft.setCursor(0, 0);
-    tft.setTextFont(1);
+    tft.setFont(&fonts::Font0);
     tft.setTextSize(2);
     tft.println("SETTINGS RESET.");
     tft.println("");
@@ -992,7 +1072,7 @@ void setup() {
     onewiretempC = sensors.getTempCByIndex(0);
     tft.fillScreen(TFT_PURPLE);
     tft.setCursor(0, 0);
-    tft.setTextFont(1);
+    tft.setFont(&fonts::Font0);
     tft.println("Calibration Mode!");
     tft.println("To begin, connect 1 meat probe in the left hole, immerse it and the calibration probe in a small cup of hot freshly boiled water (>75C), then press any button.");
     while (digitalRead(rotbutton)) { delay(1); }  //wait until a button is pressed
@@ -1003,7 +1083,7 @@ void setup() {
   }
     tft.fillScreen(TFT_CYAN);
     tft.setCursor(0, 0);
-    tft.setTextFont(1);
+    tft.setFont(&fonts::Font0);
     tft.println("Debug Mode!");
     tft.println("To begin, press any button.");
     while (digitalRead(rotbutton)) { delay(1); }  //wait until a button is pressed
@@ -1104,7 +1184,7 @@ void loop() {
   continueAudioPlayback();
   doSound();  //play the sound if needed
   continueAudioPlayback();
-  every(20) {  //every 5 milliseconds, so we don't waste battery power
+  every(8) {  //every 5 milliseconds, so we don't waste battery power
     settemp = count / 4;
     doADC();
     if (adc0 < is2connectedthreshold) {
