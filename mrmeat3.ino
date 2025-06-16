@@ -50,7 +50,7 @@ BackgroundAudioWAV BMP(audio);
 //BackgroundAudioSpeech BMP(audio);
 
 char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
-
+WidgetTerminal terminal(V10);
 #define rotLpin 21
 #define rotRpin 20
 #define rotbutton 5
@@ -60,7 +60,7 @@ char auth[] = "DU_j5IxaBQ3Dp-joTLtsB0DM70UZaEDd";
 
 OneWire oneWire(onewirepin);
 DallasTemperature sensors(&oneWire);
-
+float progress1,  progress0;
 float minsLeft;
 int animStep = 1;
 float onewiretempC, tempF, tempA0, tempA1, tempA0f, tempA1f, barx;
@@ -157,23 +157,39 @@ void waitForButtonsReleased() {
   }
 }
 
-
+BLYNK_WRITE(V10) {
+  if (String("help") == param.asStr()) {
+    terminal.println("==List of available commands:==");
+    terminal.println("wifi");
+    terminal.println("==End of list.==");
+  }
+  if (String("wifi") == param.asStr()) {
+    terminal.print("Connected to: ");
+    terminal.println(ssid);
+    terminal.print("IP address:");
+    terminal.println(WiFi.localIP());
+    terminal.print("Signal strength: ");
+    terminal.println(WiFi.RSSI());
+    //printLocalTime();
+  }
+    terminal.flush();
+}
 
 File audioFile;
 bool isAudioPlaying = false;
 
 void playWavFromFS(const char* filename) {
-  Serial.println("Playing WAV file from LittleFS...");
+  //Serial.println("Playing WAV file from LittleFS...");
   if (isAudioPlaying) return; // Already playing
 
   audioFile = LittleFS.open(filename, "r");
   if (!audioFile) {
-    Serial.println("Failed to open WAV file!");
+    //Serial.println("Failed to open WAV file!");
     return;
   }
-  Serial.println("Flushing...");
+  //Serial.println("Flushing...");
   BMP.flush();
-  Serial.println("Flushed.");
+  //Serial.println("Flushed.");
   isAudioPlaying = true;
 }
 
@@ -193,7 +209,7 @@ void continueAudioPlayback() {
   } else {
     audioFile.close();
     isAudioPlaying = false;
-    Serial.println("Audio playback finished.");
+    //Serial.println("Audio playback finished.");
   }
 }
 
@@ -202,14 +218,16 @@ float estimateBatteryTime(float voltage) {
   const int numPoints = 22;
   // Move these to static to avoid stack allocation on each call
   static const float voltages[numPoints] = {
-    4.0862, 4.0399, 3.9740, 3.9136, 3.8576, 3.8075, 3.7614, 3.7199,
-    3.6831, 3.6469, 3.6142, 3.5795, 3.4959, 3.4269, 3.3703, 3.3360,
-    3.3160, 3.2935, 3.2665, 3.2400, 3.2240, 3.2140
+    4.0961, 3.8960, 3.7211, 3.5901, 3.5369, 3.3845,
+    3.3365, 3.3395, 3.3310, 3.3200, 3.3035, 3.2860,
+    3.2650, 3.2400, 3.1925, 3.1765, 3.1370, 3.0745,
+    3.0355, 2.9495, 2.7940, 2.4070
   };
   static const float times[numPoints] = {
-    1380, 1320, 1260, 1200, 1140, 1080, 1020, 960,
-    900, 840, 780, 660, 360, 240, 97, 34,
-    24, 18, 10, 3, 1, 0
+    1020, 840, 660, 480, 300, 120,
+    45, 42, 39, 36, 33, 30,
+    27, 24, 21, 18, 15, 12,
+    9, 6, 3, 0
   };
 
   if (voltage >= voltages[0]) return times[0];
@@ -362,14 +380,14 @@ double ADSToOhms(int16_t ADSreading) { //convert raw ADS reading to a measured r
 
 
 void drawTemps() {  //main screen
-Serial.println("reading button");
+//Serial.println("reading button");
   if (!digitalRead(rotbutton)) {  //if both are pressed at the same time
     settingspage = true;          //go to settings page
     enc_count = count;
     waitForButtonsReleased();
   }
 
-Serial.println("filling sprite");
+//Serial.println("filling sprite");
   img.fillSprite(cmap[setBGC]);
   img.setCursor(0, 0);
   img.setTextSize(1);
@@ -379,10 +397,10 @@ Serial.println("filling sprite");
   // Proportional scaling factors
   // 240x240 -> 128x160: x = x * 0.533, y = y * 0.666
   // Example: 240 -> 128, 240 -> 160
-  Serial.println("setting font 8");
+  //Serial.println("setting font 8");
   img.setFont(&fonts::Font8);
 //smaller font for 128x160
-  Serial.println("checking connections");
+  //Serial.println("checking connections");
   if (is2connected && is1connected) {
 
     float a0ex = 164.4;
@@ -395,14 +413,14 @@ Serial.println("filling sprite");
   } else if (!is1connected && is2connected) {
     img.drawFloat(tempA1f, 1, 120, 42);  // 115,5 -> 56,3
   } else {
-    img.setFont(&fonts::Font8);         //use a smaller font
-    img.drawString("N/C", 120, 22, 1);  // 115,5 -> 56,3
+    img.setFont(AA_FONT_LARGE);         //use a smaller font
+    img.drawString("N/C", 120, 22);  // 115,5 -> 56,3
     //img.unloadFont();
   }
-  Serial.println("drawing lines");
+  //Serial.println("drawing lines");
   img.drawFastHLine(0, 175, 240, cmap[setFGC]);  // 0,85,240 -> 0,56,128
   //img.unloadFont();
-  Serial.println("setting font 1");
+  //Serial.println("setting font 1");
   img.setFont(&fonts::Font0);
   img.setTextDatum(TR_DATUM);
 
@@ -420,15 +438,15 @@ Serial.println("filling sprite");
 
   img.setTextDatum(TL_DATUM);
   img.setFont(AA_FONT_LARGE);
-  Serial.println("setting freefont 1");
+  //Serial.println("setting freefont 1");
   //img.setFont(&fonts::AA_FONT_LARGE);
   img.setCursor(3, 175);  // 5,100+24 -> 3,70
-  Serial.println("snprintf settempstring");
+  //Serial.println("snprintf settempstring");
   snprintf(settempstring, sizeof(settempstring), ">%d<", count / 4);
 
   //img.print("Set:");
   img.setTextDatum(TC_DATUM);
-  Serial.println("drawing settempstring");
+  //Serial.println("drawing settempstring");
   img.drawString(settempstring, 120, 190);
 
   img.setTextDatum(TC_DATUM);
@@ -436,20 +454,20 @@ Serial.println("filling sprite");
   //img.loadFont(AA_FONT_SMALL);
   img.setCursor(120, 195 + 24);
   //img.drawString("ETA:", 120, 219, 1);
-  Serial.println("calculating ETA");
+  //Serial.println("calculating ETA");
   if ((etamins < 1000) && (etamins >= 0)) {
     snprintf(etastring, sizeof(etastring), "%dmins", etamins);
   } else {
     snprintf(etastring, sizeof(etastring), "---mins");
   }
   img.setTextDatum(BC_DATUM);
-  Serial.println("drawing etastring");
+  //Serial.println("drawing etastring");
   img.drawString(etastring, 120, 300);
   //img.unloadFont();
   img.setFont(&fonts::Font0);
 
   img.drawFastHLine(0, 320 - 14, 240, cmap[setFGC]);  // 0,226,240 -> 0,150,128
-  Serial.println("drawing bottom row");
+  //Serial.println("drawing bottom row");
   if (setIcons == 0) {
     img.setCursor(0, 320);  // 1,231
     img.print(WiFi.localIP());
@@ -482,9 +500,9 @@ Serial.println("filling sprite");
   img.fillRect(animpos, 312, 4, 4, cmap[setFGC]);  //draw our little status indicator
   animpos++;                                    //make it fly
   if (animpos > 160) { animpos = 130; }            //make it wrap around
-  Serial.println("pushing sprite");
+  //Serial.println("pushing sprite");
   img.pushSprite(0, 0);
-  Serial.println("drawTemps done");
+  //Serial.println("drawTemps done");
 }
 
 
@@ -586,7 +604,7 @@ uint8_t findDevices(int pin) {
       Serial.println("  {");
       for (uint8_t i = 0; i < 8; i++) {
         Serial.print("0x");
-        if (address[i] < 0x10) Serial.print("0");
+        if (address[i] < 0x10) //Serial.print("0");
         Serial.print(address[i], HEX);
         if (i < 7) Serial.print(", ");
       }
@@ -837,17 +855,17 @@ void drawCalib() {
     if ((onewiretempC >= 75.0) && (onewiretempC <= 76.0)) {
       temp1 = onewiretempC;
       therm1 = ADSToOhms(volts0);
-      Serial.println("Temp1 set to: " + String(temp1) + " C, resistance: " + String(therm1) + " Ohms");
+      //Serial.println("Temp1 set to: " + String(temp1) + " C, resistance: " + String(therm1) + " Ohms");
     }
     if ((onewiretempC >= 50.0) && (onewiretempC <= 51.0)) {
       temp2 = onewiretempC;
       therm2 = ADSToOhms(volts0);
-      Serial.println("Temp2 set to: " + String(temp2) + " C, resistance: " + String(therm2) + " Ohms");
+      //Serial.println("Temp2 set to: " + String(temp2) + " C, resistance: " + String(therm2) + " Ohms");
     }
     if ((onewiretempC >= 30.0) && (onewiretempC <= 31.0)) {
       temp3 = onewiretempC;
       therm3 = ADSToOhms(volts0);
-      Serial.println("Temp3 set to: " + String(temp3) + " C, resistance: " + String(therm3) + " Ohms");
+      //Serial.println("Temp3 set to: " + String(temp3) + " C, resistance: " + String(therm3) + " Ohms");
     }
   }
 
@@ -864,7 +882,7 @@ void drawCalib() {
 
   if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {
     if (!saved) {
-      Serial.println("Calculating coefficients data...");
+      //Serial.println("Calculating coefficients data...");
       thermistor.setTemperature1(temp1 + 273.15);
       thermistor.setTemperature2(temp2 + 273.15);
       thermistor.setTemperature3(temp3 + 273.15);
@@ -877,7 +895,7 @@ void drawCalib() {
       snprintf(coeffAstring, sizeof(coeffAstring), "A: %.5f", thermistor.getCoeffA());
       snprintf(coeffBstring, sizeof(coeffBstring), "B: %.5f", thermistor.getCoeffB());
       snprintf(coeffCstring, sizeof(coeffCstring), "C: %.5f", thermistor.getCoeffC());
-      Serial.println("Saving coefficients to flash:");
+      //Serial.println("Saving coefficients to flash:");
       preferences.begin("my-app", false);
       preferences.putInt("temp1", temp1);
       preferences.putInt("temp2", temp2);
@@ -891,7 +909,7 @@ void drawCalib() {
     img.fillSprite(TFT_GREEN);
     img.setCursor(0, 0);
     img.println("Calibration saved, please reboot!");
-    Serial.println("Calibration saved, please reboot!");
+    //Serial.println("Calibration saved, please reboot!");
     img.setTextSize(2);
 
     img.drawString(temp1string, 0, 40);
@@ -922,14 +940,14 @@ void setup() {
   //digitalWrite( GPIO_NUM_10, 0 ); // also try with 1
   delay(100);
   abOld = count = old_count = 0;
-  Serial.begin(115200);
+  //Serial.begin(115200);
   delay(1000);  //wait for serial to start
-  Serial.println("Starting up...");
-  Serial.println("Hello!");
+  //Serial.println("Starting up...");
+  //Serial.println("Hello!");
   if (tft.init()) {
-    Serial.println("LCD init OK");
+    //Serial.println("LCD init OK");
   } else {
-    Serial.println("LCD init FAILED");
+    //Serial.println("LCD init FAILED");
   }
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
@@ -940,7 +958,7 @@ void setup() {
   adc.begin();  //fire up the ADC
   adc.setGain(GAIN_ONE);  //1x gain setting is perfect
   adc.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, false);
-  Serial.println("Loading prefs");
+  //Serial.println("Loading prefs");
   preferences.begin("my-app", false);  //read preferences from flash, with default values if none are found
   temp1 = preferences.getInt("temp1", 0);
   temp2 = preferences.getInt("temp2", 0);
@@ -957,13 +975,13 @@ void setup() {
   setIcons = preferences.getInt("setIcons", 1);
   count = preferences.getInt("enc_count", 580);
   preferences.end();
-  Serial.println("done Loading prefs");
+  //Serial.println("done Loading prefs");
   BMP.setGain(setVolume / 100.0);
   if (setFGC == setBGC) {
     setFGC = 15;
     setBGC = 0;
   }                                      
-  Serial.println("doing therm calcs");           //do not allow foreground and background colour to be the same
+  //Serial.println("doing therm calcs");           //do not allow foreground and background colour to be the same
   if ((temp3 > 0) && (temp2 > 0) && (temp1 > 0)) {  //if probe temp calibration has been saved to flash, use it
     thermistor.setTemperature1(temp1 + 273.15);
     thermistor.setTemperature2(temp2 + 273.15);
@@ -973,28 +991,28 @@ void setup() {
     thermistor.setResistance3(therm3);
     thermistor.calcCoefficients();
   }
-  Serial.println("creating sprite");
+  //Serial.println("creating sprite");
   img.setColorDepth(8);  //WE DONT HAVE ENOUGH RAM LEFT FOR 16 BIT AND JOHNNY CASH, MUST USE 8 BIT COLOUR!
   if (!img.createSprite(240, 320))  {
-   Serial.println("Failed to create sprite!");
+   //Serial.println("Failed to create sprite!");
   }
   img.fillSprite(TFT_BLUE);
   img.setTextWrap(true);  // Wrap on width
   img.setTextSize(2);
   oldtemp = tempA0f;  // Initialize oldtemp for future ETA calculations
   oldtemp2 = tempA1f;
-  Serial.println("filling screen");
+  //Serial.println("filling screen");
   //tft.fillScreen(cmap[setBGC]);
-  Serial.println("forcing adc");
+  //Serial.println("forcing adc");
   forceADC();
-  Serial.println("drawing temps");
+  //Serial.println("drawing temps");
   drawTemps();
-  Serial.println("Starting wifi");
+  //Serial.println("Starting wifi");
   WiFi.mode(WIFI_STA);  //precharge the wifi
   WiFiManager wm;       //FIRE UP THE WIFI MANAGER SYSTEM FOR WIFI PROVISIONING
 
   if ((!digitalRead(rotbutton)) || !wm.getWiFiIsSaved()) {  //If either both buttons are pressed on bootup OR no wifi info is saved
-    Serial.println("Resetting stuff");
+    //Serial.println("Resetting stuff");
     //nvs_flash_erase(); // erase the NVS partition to wipe all settings
     //nvs_flash_init(); // initialize the NVS partition.
     preferences.begin("my-app", false);  //read preferences from flash, with default values if none are found
@@ -1013,7 +1031,7 @@ void setup() {
     preferences.putInt("setIcons", 1);
     preferences.putInt("enc_count", 580);
     preferences.end();
-    Serial.println("Prefs reset");
+    //Serial.println("Prefs reset");
     tft.fillScreen(TFT_ORANGE);
     tft.setCursor(0, 0);
     tft.setFont(&fonts::Font0);
@@ -1048,7 +1066,7 @@ void setup() {
       ESP.restart();  //restart the device now because bugs, user will never notice it's so fuckin fast
     }
   } else {  //if wifi information was saved, use it
-    Serial.println("Wifi information found, using...");
+    //Serial.println("Wifi information found, using...");
     WiFi.begin(wm.getWiFiSSID(), wm.getWiFiPass());
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
   }
@@ -1077,24 +1095,24 @@ void setup() {
     tft.println("To begin, connect 1 meat probe in the left hole, immerse it and the calibration probe in a small cup of hot freshly boiled water (>75C), then press any button.");
     while (digitalRead(rotbutton)) { delay(1); }  //wait until a button is pressed
   } else {
-    Serial.println("No onewire probes found.");
+    //Serial.println("No onewire probes found.");
     attachInterrupt(digitalPinToInterrupt(rotLpin), pinChangeISR, CHANGE);  // Set up pin-change interrupts
     attachInterrupt(digitalPinToInterrupt(rotRpin), pinChangeISR, CHANGE);
   }
-    tft.fillScreen(TFT_CYAN);
+    /*tft.fillScreen(TFT_CYAN);
     tft.setCursor(0, 0);
     tft.setFont(&fonts::Font0);
     tft.println("Debug Mode!");
     tft.println("To begin, press any button.");
     while (digitalRead(rotbutton)) { delay(1); }  //wait until a button is pressed
 
-    waitForButtonsReleased();  //wait for button to be released
+    waitForButtonsReleased();  //wait for button to be released*/
   
 
-    Serial.println("Blynk connected.");
-    Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
-    Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
-    Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    //Serial.println("Blynk connected.");
+    //Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    //Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    //Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     tft.fillScreen(cmap[setBGC]);
 }
 
@@ -1102,31 +1120,31 @@ void setup() {
 
 void doSound() {    //play the sound
   if (playSound) {  //if sound is enabled
-    Serial.println("Playing sound");
+    //Serial.println("Playing sound");
     playSound = false;
     switch (setAlarm) {
       case 0:
-        Serial.println("Playing 0");
+        //Serial.println("Playing 0");
         //BMP.end();
         playWavFromFS("/ringoffire.wav");
         break;
       case 1:
-        Serial.println("Playing 1");
+        //Serial.println("Playing 1");
         //BMP.end();
         playWavFromFS("/weirdal.wav");
         break;
       case 2:
-        Serial.println("Playing 2");
+        //Serial.println("Playing 2");
         //BMP.end();
         playWavFromFS("/shave.wav");
         break;
       case 3:
-        Serial.println("Playing 3");
+        //Serial.println("Playing 3");
         //BMP.end();
         playWavFromFS("/suppertime.wav");
         break;
       case 4:
-        Serial.println("Playing 4");
+        //Serial.println("Playing 4");
         //BMP.end();
         playWavFromFS("/dingfries.wav");
         break;
@@ -1162,7 +1180,7 @@ void loop() {
     ArduinoOTA.begin();
 
 
-    Serial.println("Connecting blynk...");
+    //Serial.println("Connecting blynk...");
     Blynk.config(auth, IPAddress(192, 168, 50, 197), 8080);
     Blynk.connect();  //Init Blynk
   }
@@ -1184,7 +1202,7 @@ void loop() {
   continueAudioPlayback();
   doSound();  //play the sound if needed
   continueAudioPlayback();
-  every(8) {  //every 5 milliseconds, so we don't waste battery power
+  every(100) {  //every 5 milliseconds, so we don't waste battery power
     settemp = count / 4;
     doADC();
     if (adc0 < is2connectedthreshold) {
@@ -1232,9 +1250,9 @@ void loop() {
       sensors.requestTemperatures();
       onewiretempC = sensors.getTempCByIndex(0);
     }
-    //Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
-    //Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
-    //Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    ////Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    ////Serial.printf("Free stack: %u\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    ////Serial.printf("Free largest block: %u\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
 
 
@@ -1247,7 +1265,7 @@ void loop() {
     int ETA_INTERVAL = 15;
     //manually set this to ETA_INTERVAL*1000, can't hardcode due to macro
     if (!calibrationMode) {
-      minsLeft = estimateBatteryTime(volts2);
+      
       tempdiff = tempA0f - oldtemp;
       if (is2connected) {  //If 2nd probe is connected, calculate whichever ETA is sooner in seconds
         tempdiff2 = tempA1f - oldtemp2;
@@ -1267,18 +1285,55 @@ void loop() {
     }
   }
 
-  every(30000) {  //every 10 seconds
+  every(20000) {  //every 20 seconds
     volts2 = adc.computeVolts(adc2) * 2.0; //update the battery voltage
     //volts2 = maxlipo.cellVoltage();
     barx = mapf (volts2, 3.2, 4.0, 0, 20); //update the battery icon length
-    if (is2connected) { Blynk.virtualWrite(V4, tempA1f); }
-    if (is1connected) { Blynk.virtualWrite(V2, tempA0f); }
+    minsLeft = estimateBatteryTime(volts2);
+    if (is2connected) { 
+           progress1 = (tempA1f / settemp) * 100.0;
+          if (progress1 > 100.0) progress1 = 100.0;  // Clamp
+          Blynk.virtualWrite(V4, tempA1f); 
+          Blynk.virtualWrite(V11, progress1);
+          Blynk.setProperty(V11, "label", String(tempA1f, 1) + "°F / " + String(settemp, 0) + "°F");
+          Blynk.setProperty(V11, "color", "#FF0000");  // Set color to red
+          Blynk.setProperty(V4, "color", "#FF0000");  // Set color to red
+          Blynk.setProperty(V4, "label", "Temp 2");
+    } else {
+          Blynk.virtualWrite(V11, 0);
+          Blynk.virtualWrite(V4, 0); 
+          Blynk.setProperty(V11, "label", "N/C");
+          Blynk.setProperty(V11, "color", "#333333");  // Set color to gray
+          Blynk.setProperty(V4, "color", "#333333");  // Set color to gray
+          Blynk.setProperty(V4, "label", "N/C");
+      }
+    if (is1connected) { 
+           progress0 = (tempA0f / settemp) * 100.0;
+          if (progress0 > 100.0) progress0 = 100.0;  // Clamp
+          Blynk.virtualWrite(V2, tempA0f);
+          Blynk.virtualWrite(V9, progress0);
+          Blynk.setProperty(V9, "label", String(tempA0f, 1) + "°F / " + String(settemp, 0) + "°F");
+          Blynk.setProperty(V9, "color", "#FF0000");  // Set color to red
+          Blynk.setProperty(V2, "color", "#FF0000");  // Set color to red
+          Blynk.setProperty(V2, "label", "Temp 1");
+    } else {
+          Blynk.virtualWrite(V9, 0);
+          Blynk.virtualWrite(V2, 0);
+          Blynk.setProperty(V9, "label", "N/C");
+          Blynk.setProperty(V9, "color", "#333333");  // Set color to gray
+          Blynk.setProperty(V2, "color", "#333333");  // Set color to gray
+          Blynk.setProperty(V2, "label", "N/C");
+      }
+        
     if ((etamins < 1000) && (etamins >= 0)) {
       Blynk.virtualWrite(V6, etamins);
       
     }
     Blynk.virtualWrite(V7, temperatureRead());
     Blynk.virtualWrite(V5, volts2);
+    Blynk.virtualWrite(V8, settemp);
+
+
     //Blynk.virtualWrite(V8, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
    // UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
 
